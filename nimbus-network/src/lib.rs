@@ -1,5 +1,4 @@
 pub mod capabilities;
-pub mod connection;
 pub mod hotspot;
 pub mod interface;
 pub mod manager;

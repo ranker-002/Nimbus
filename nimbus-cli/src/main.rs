@@ -56,7 +56,7 @@ async fn main() {
     let cli = Cli::parse();
     let nm = NmManager::new().await;
 
-    match cli.command {
+    let result = match cli.command {
         Commands::Start {
             ssid,
             password,
@@ -67,7 +67,7 @@ async fn main() {
             let password = password.unwrap_or_else(|| {
                 println!("Enter password: ");
                 let mut input = String::new();
-                std::io::stdin().read_line(&mut input).unwrap();
+                std::io::stdin().read_line(&mut input).expect("Failed to read password");
                 input.trim().to_string()
             });
 
@@ -85,56 +85,81 @@ async fn main() {
                 auto_start: false,
             };
 
-            let _upstream = nm.get_upstream_interface().await.unwrap_or(None).unwrap_or_else(|| {
-                eprintln!("No upstream interface found");
-                std::process::exit(1);
-            });
+            if let Err(e) = config.validate() {
+                eprintln!("Invalid configuration: {}", e);
+                return;
+            }
 
-            let wifi_devices = nm.get_wifi_devices().await.unwrap_or_else(|e| {
-                eprintln!("Failed to get WiFi devices: {}", e);
-                std::process::exit(1);
-            });
+            let _upstream = match nm.get_upstream_interface().await {
+                Ok(Some(iface)) => iface,
+                Ok(None) => {
+                    eprintln!("No upstream interface found");
+                    return;
+                }
+                Err(e) => {
+                    eprintln!("Failed to find upstream interface: {}", e);
+                    return;
+                }
+            };
 
-            let interface = wifi_devices.first().map(|d| d.name.clone()).unwrap_or_else(|| {
-                eprintln!("No WiFi adapter found");
-                std::process::exit(1);
-            });
+            let wifi_devices = match nm.get_wifi_devices().await {
+                Ok(devices) => devices,
+                Err(e) => {
+                    eprintln!("Failed to get WiFi devices: {}", e);
+                    return;
+                }
+            };
+
+            let interface = match wifi_devices.first().map(|d| d.name.clone()) {
+                Some(name) => name,
+                None => {
+                    eprintln!("No WiFi adapter found");
+                    return;
+                }
+            };
 
             match nm.create_hotspot(&config, &interface).await {
                 Ok(info) => {
-                    println!("✓ Hotspot '{}' started on {}", info.ssid, info.interface);
+                    println!("Hotspot '{}' started on {}", info.ssid, info.interface);
                     println!("  IP: {}", info.ip);
                     println!("  Press Ctrl+C to stop");
 
                     tokio::signal::ctrl_c().await.ok();
                     let _ = nm.stop_hotspot().await;
-                    println!("✓ Hotspot stopped");
+                    println!("Hotspot stopped");
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to start hotspot: {}", e);
-                    std::process::exit(1);
+                    eprintln!("Failed to start hotspot: {}", e);
                 }
             }
+            Ok(())
         }
         Commands::Stop => match nm.stop_hotspot().await {
-            Ok(()) => println!("✓ Hotspot stopped"),
+            Ok(()) => {
+                println!("Hotspot stopped");
+                Ok(())
+            }
             Err(e) => {
-                eprintln!("✗ Failed to stop hotspot: {}", e);
-                std::process::exit(1);
+                eprintln!("Failed to stop hotspot: {}", e);
+                Err(e)
             }
         },
         Commands::Status => match nm.get_active_hotspot().await {
             Ok(Some(info)) => {
-                println!("✓ Hotspot active");
+                println!("Hotspot active");
                 println!("  SSID: {}", info.ssid);
                 println!("  Interface: {}", info.interface);
                 println!("  IP: {}", info.ip);
                 println!("  Frequency: {} MHz", info.frequency);
+                Ok(())
             }
-            Ok(None) => println!("No active hotspot"),
+            Ok(None) => {
+                println!("No active hotspot");
+                Ok(())
+            }
             Err(e) => {
-                eprintln!("✗ Failed to get status: {}", e);
-                std::process::exit(1);
+                eprintln!("Failed to get status: {}", e);
+                Err(e)
             }
         },
         Commands::Devices => {
@@ -146,18 +171,23 @@ async fn main() {
                         println!("Connected devices: {}", stations.len());
                         for s in &stations {
                             println!(
-                                "  {} - Signal: {} dBm, ↑{} ↓{}",
+                                "  {} - Signal: {} dBm, {} {}",
                                 s.mac,
                                 s.signal_dbm,
                                 nimbus_telemetry::manufacturer::format_bytes(s.tx_bytes),
                                 nimbus_telemetry::manufacturer::format_bytes(s.rx_bytes),
                             );
                         }
+                        Ok(())
                     }
-                    Err(e) => eprintln!("✗ Failed to get devices: {}", e),
+                    Err(e) => {
+                        eprintln!("Failed to get devices: {}", e);
+                        Err(e)
+                    }
                 }
             } else {
                 println!("No WiFi adapter found");
+                Ok(())
             }
         }
         Commands::Scan => {
@@ -173,24 +203,37 @@ async fn main() {
                                 n.ssid, n.bssid, n.channel, n.signal_dbm
                             );
                         }
+                        Ok(())
                     }
-                    Err(e) => eprintln!("✗ Scan failed: {}", e),
-                }
-            }
-        }
-        Commands::Interfaces => {
-            match nm.get_all_interfaces().await {
-                Ok(interfaces) => {
-                    println!("Network interfaces:");
-                    for iface in &interfaces {
-                        println!(
-                            "  {} ({:?}) - {:?} - {}",
-                            iface.name, iface.interface_type, iface.state, iface.mac
-                        );
+                    Err(e) => {
+                        eprintln!("Scan failed: {}", e);
+                        Err(e)
                     }
                 }
-                Err(e) => eprintln!("✗ Failed to list interfaces: {}", e),
+            } else {
+                println!("No WiFi adapter found");
+                Ok(())
             }
         }
+        Commands::Interfaces => match nm.get_all_interfaces().await {
+            Ok(interfaces) => {
+                println!("Network interfaces:");
+                for iface in &interfaces {
+                    println!(
+                        "  {} ({:?}) - {:?} - {}",
+                        iface.name, iface.interface_type, iface.state, iface.mac
+                    );
+                }
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("Failed to list interfaces: {}", e);
+                Err(e)
+            }
+        },
+    };
+
+    if result.is_err() {
+        std::process::exit(1);
     }
 }

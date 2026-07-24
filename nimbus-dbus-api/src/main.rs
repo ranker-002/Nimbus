@@ -29,6 +29,13 @@ impl NimbusDbus {
             ..Default::default()
         };
 
+        if let Err(e) = config.validate() {
+            return Err(zbus::fdo::Error::Failed(format!(
+                "Invalid configuration: {}",
+                e
+            )));
+        }
+
         let wifi_devices = self.nm.get_wifi_devices().await.map_err(|e| {
             zbus::fdo::Error::Failed(e.to_string())
         })?;
@@ -58,11 +65,11 @@ impl NimbusDbus {
         }
     }
 
-    async fn get_interfaces(&self) -> zbus::fdo::Result<String> {
+    async fn get_interfaces(&self) -> zbus::fdo::Result<Vec<String>> {
         match self.nm.get_all_interfaces().await {
             Ok(interfaces) => {
                 let names: Vec<String> = interfaces.iter().map(|i| i.name.clone()).collect();
-                Ok(names.join(","))
+                Ok(names)
             }
             Err(e) => Err(zbus::fdo::Error::Failed(e.to_string())),
         }

@@ -6,9 +6,7 @@ use chrono::{DateTime, Utc};
 use mac_address::MacAddress;
 use serde::{Deserialize, Serialize};
 
-pub const APP_ID: &str = "com.nimbus.Hotspot";
-pub const APP_NAME: &str = "Nimbus Hotspot";
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+use crate::constants::{MAX_CLIENTS_MAX, MAX_PASSWORD_LEN, MAX_SSID_LEN, MIN_PASSWORD_LEN};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Band {
@@ -96,36 +94,69 @@ impl Default for HotspotConfig {
 
 impl HotspotConfig {
     pub fn validate(&self) -> crate::Result<()> {
-        if self.ssid.is_empty() || self.ssid.len() > 32 {
-            return Err(crate::NimbusError::InvalidValue(
-                "SSID must be 1-32 characters".into(),
-            ));
+        if self.ssid.is_empty() || self.ssid.len() > MAX_SSID_LEN {
+            return Err(crate::NimbusError::InvalidValue(format!(
+                "SSID must be 1-{} characters",
+                MAX_SSID_LEN
+            )));
         }
-        if self.security != Security::Open && self.password.len() < 8 {
-            return Err(crate::NimbusError::PasswordTooShort);
+
+        if self.security != Security::Open {
+            if self.password.len() < MIN_PASSWORD_LEN {
+                return Err(crate::NimbusError::PasswordTooShort);
+            }
+            if self.password.len() > MAX_PASSWORD_LEN {
+                return Err(crate::NimbusError::InvalidValue(format!(
+                    "Password must be at most {} characters",
+                    MAX_PASSWORD_LEN
+                )));
+            }
         }
-        if self.security == Security::Wpa3
-            && !matches!(
-                self.security,
-                Security::Wpa3 | Security::Wpa2Wpa3Transition
-            )
-        {
-            return Err(crate::NimbusError::InvalidValue(
-                "WPA3 requires compatible security mode".into(),
-            ));
+
+        if let Some(max) = self.max_clients {
+            if max > MAX_CLIENTS_MAX {
+                return Err(crate::NimbusError::InvalidValue(format!(
+                    "Max clients must be at most {}",
+                    MAX_CLIENTS_MAX
+                )));
+            }
         }
+
+        if let Some(ch) = self.channel {
+            match self.band {
+                Band::Band2_4Ghz => {
+                    if !(1..=13).contains(&ch) {
+                        return Err(crate::NimbusError::InvalidValue(
+                            "Channel for 2.4 GHz must be 1-13".into(),
+                        ));
+                    }
+                }
+                Band::Band5Ghz => {
+                    if !(36..=165).contains(&ch) || ch % 4 != 0 {
+                        return Err(crate::NimbusError::InvalidValue(
+                            "Channel for 5 GHz must be 36-165 (step 4)".into(),
+                        ));
+                    }
+                }
+                Band::Auto => {}
+            }
+        }
+
         Ok(())
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum HotspotState {
+    #[default]
     Inactive,
     Starting,
     Active(String),
     Stopping,
     Error(String),
 }
+
 
 #[derive(Debug, Clone)]
 pub struct HotspotInfo {
@@ -139,7 +170,11 @@ pub struct HotspotInfo {
 
 impl PartialEq for HotspotInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.interface == other.interface && self.ssid == other.ssid
+        self.interface == other.interface
+            && self.ssid == other.ssid
+            && self.ip == other.ip
+            && self.frequency == other.frequency
+            && self.channel == other.channel
     }
 }
 

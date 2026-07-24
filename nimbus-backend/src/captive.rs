@@ -1,5 +1,3 @@
-use std::process::Command;
-
 use nimbus_core::error::{NimbusError, Result};
 
 pub struct CaptivePortalManager;
@@ -29,7 +27,7 @@ address=/nmcheck.gnome.org/{portal_ip}
         );
 
         let config_path = "/etc/NetworkManager/dnsmasq-shared.d/nimbus-captive.conf";
-        std::fs::write(config_path, &dns_hijack).map_err(|e| {
+        tokio::fs::write(config_path, &dns_hijack).await.map_err(|e| {
             NimbusError::ConfigError(format!("Failed to write captive DNS: {}", e))
         })?;
 
@@ -45,17 +43,23 @@ address=/nmcheck.gnome.org/{portal_ip}
             iface = ap_iface,
         );
 
-        let status = Command::new("nft")
+        let mut child = tokio::process::Command::new("nft")
             .args(["-f", "-"])
             .stdin(std::process::Stdio::piped())
             .spawn()
-            .and_then(|mut child| {
-                if let Some(ref mut stdin) = child.stdin {
-                    std::io::Write::write_all(stdin, nft_rule.as_bytes())?;
-                }
-                child.wait()
-            })
             .map_err(|e| NimbusError::NftablesError(format!("Failed to run nft: {}", e)))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt;
+            stdin.write_all(nft_rule.as_bytes()).await.map_err(|e| {
+                NimbusError::NftablesError(format!("Failed to write nft rule: {}", e))
+            })?;
+        }
+
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| NimbusError::NftablesError(format!("Failed to wait nft: {}", e)))?;
 
         if !status.success() {
             return Err(NimbusError::NftablesError(
@@ -68,7 +72,13 @@ address=/nmcheck.gnome.org/{portal_ip}
 
     pub async fn cleanup(&self) -> Result<()> {
         let config_path = "/etc/NetworkManager/dnsmasq-shared.d/nimbus-captive.conf";
-        let _ = std::fs::remove_file(config_path);
-        Ok(())
+        match tokio::fs::remove_file(config_path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(NimbusError::ConfigError(format!(
+                "Failed to remove captive DNS config: {}",
+                e
+            ))),
+        }
     }
 }

@@ -1,6 +1,5 @@
-use std::process::Command;
-
 use nimbus_core::error::{NimbusError, Result};
+use nimbus_network::manager::validate_mac;
 
 pub struct FirewallManager;
 
@@ -40,17 +39,23 @@ impl FirewallManager {
             upstream = upstream_iface,
         );
 
-        let status = Command::new("nft")
+        let mut child = tokio::process::Command::new("nft")
             .args(["-f", "-"])
             .stdin(std::process::Stdio::piped())
             .spawn()
-            .and_then(|mut child| {
-                if let Some(ref mut stdin) = child.stdin {
-                    std::io::Write::write_all(stdin, rules.as_bytes())?;
-                }
-                child.wait()
-            })
             .map_err(|e| NimbusError::NftablesError(format!("Failed to run nft: {}", e)))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt;
+            stdin.write_all(rules.as_bytes()).await.map_err(|e| {
+                NimbusError::NftablesError(format!("Failed to write nft rules: {}", e))
+            })?;
+        }
+
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| NimbusError::NftablesError(format!("Failed to wait nft: {}", e)))?;
 
         if !status.success() {
             return Err(NimbusError::NftablesError("nft command failed".into()));
@@ -61,15 +66,23 @@ impl FirewallManager {
     }
 
     pub async fn cleanup(&self, _ap_iface: &str, _upstream_iface: &str) -> Result<()> {
-        let _ = Command::new("nft")
+        let _ = tokio::process::Command::new("nft")
             .args(["delete", "table", "ip", "nimbus"])
-            .status();
+            .status()
+            .await;
 
         disable_ip_forward().await?;
         Ok(())
     }
 
     pub async fn add_blacklist_rule(&self, ap_iface: &str, mac: &str) -> Result<()> {
+        if !validate_mac(mac) {
+            return Err(NimbusError::InvalidValue(format!(
+                "Invalid MAC address: {}",
+                mac
+            )));
+        }
+
         let rule = format!(
             r#"
             table ip nimbus {{
@@ -82,17 +95,23 @@ impl FirewallManager {
             mac = mac,
         );
 
-        let status = Command::new("nft")
+        let mut child = tokio::process::Command::new("nft")
             .args(["-f", "-"])
             .stdin(std::process::Stdio::piped())
             .spawn()
-            .and_then(|mut child| {
-                if let Some(ref mut stdin) = child.stdin {
-                    std::io::Write::write_all(stdin, rule.as_bytes())?;
-                }
-                child.wait()
-            })
             .map_err(|e| NimbusError::NftablesError(format!("Failed to run nft: {}", e)))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            use tokio::io::AsyncWriteExt;
+            stdin.write_all(rule.as_bytes()).await.map_err(|e| {
+                NimbusError::NftablesError(format!("Failed to write nft rule: {}", e))
+            })?;
+        }
+
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| NimbusError::NftablesError(format!("Failed to wait nft: {}", e)))?;
 
         if !status.success() {
             return Err(NimbusError::NftablesError(
@@ -102,22 +121,65 @@ impl FirewallManager {
         Ok(())
     }
 
-    pub async fn remove_blacklist_rule(&self, _ap_iface: &str, _mac: &str) -> Result<()> {
-        let _ = Command::new("nft")
-            .args([
-                "delete", "rule", "ip", "nimbus", "blacklist", "handle", "0",
-            ])
-            .status();
-        Ok(())
+    pub async fn remove_blacklist_rule(&self, _ap_iface: &str, mac: &str) -> Result<()> {
+        if !validate_mac(mac) {
+            return Err(NimbusError::InvalidValue(format!(
+                "Invalid MAC address: {}",
+                mac
+            )));
+        }
+
+        let output = tokio::process::Command::new("nft")
+            .args(["-a", "list", "chain", "ip", "nimbus", "blacklist"])
+            .output()
+            .await
+            .map_err(|e| NimbusError::NftablesError(format!("Failed to list rules: {}", e)))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            if line.contains(mac) {
+                if let Some(handle_pos) = line.rfind("handle ") {
+                    let handle_str = &line[handle_pos + 8..].trim();
+                    if let Ok(handle) = handle_str.parse::<u32>() {
+                        let _ = tokio::process::Command::new("nft")
+                            .args([
+                                "delete",
+                                "rule",
+                                "ip",
+                                "nimbus",
+                                "blacklist",
+                                "handle",
+                                &handle.to_string(),
+                            ])
+                            .status()
+                            .await;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        Err(NimbusError::NftablesError(format!(
+            "Blacklist rule for {} not found",
+            mac
+        )))
     }
 
     pub async fn enable_client_isolation(&self, ap_iface: &str) -> Result<()> {
-        let _ = Command::new("nft")
+        let status = tokio::process::Command::new("nft")
             .args([
                 "add", "rule", "ip", "nimbus", "forward", "iifname", ap_iface, "oifname",
                 ap_iface, "drop",
             ])
-            .status();
+            .status()
+            .await
+            .map_err(|e| NimbusError::NftablesError(format!("Failed to run nft: {}", e)))?;
+
+        if !status.success() {
+            return Err(NimbusError::NftablesError(
+                "Failed to enable client isolation".into(),
+            ));
+        }
         Ok(())
     }
 }

@@ -1,4 +1,3 @@
-
 use nimbus_core::error::{NimbusError, Result};
 
 pub struct DnsManager;
@@ -29,15 +28,24 @@ dhcp-authoritative
         );
 
         let config_path = "/etc/NetworkManager/dnsmasq-shared.d/nimbus-hotspot.conf";
-        std::fs::write(config_path, &config)
-            .map_err(|e| NimbusError::ConfigError(format!("Failed to write dnsmasq config: {}", e)))?;
+        tokio::fs::write(config_path, &config)
+            .await
+            .map_err(|e| {
+                NimbusError::ConfigError(format!("Failed to write dnsmasq config: {}", e))
+            })?;
 
         Ok(())
     }
 
     pub async fn cleanup(&self) -> Result<()> {
         let config_path = "/etc/NetworkManager/dnsmasq-shared.d/nimbus-hotspot.conf";
-        let _ = std::fs::remove_file(config_path);
-        Ok(())
+        match tokio::fs::remove_file(config_path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(NimbusError::ConfigError(format!(
+                "Failed to remove dnsmasq config: {}",
+                e
+            ))),
+        }
     }
 }

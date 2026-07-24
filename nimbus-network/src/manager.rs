@@ -15,7 +15,7 @@ use crate::interface;
 use crate::station;
 use crate::traits::NetworkManagerApi;
 
-fn parse_mac(s: &str) -> MacAddress {
+pub fn parse_mac(s: &str) -> MacAddress {
     let cleaned: String = s
         .chars()
         .filter(|c| c.is_ascii_hexdigit() || *c == ':')
@@ -31,6 +31,14 @@ fn parse_mac(s: &str) -> MacAddress {
     } else {
         MacAddress::new([0; 6])
     }
+}
+
+pub fn validate_mac(s: &str) -> bool {
+    let parts: Vec<&str> = s.split(':').collect();
+    if parts.len() != 6 {
+        return false;
+    }
+    parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 pub struct NmManager {
@@ -254,14 +262,44 @@ impl NetworkManagerApi for NmManager {
                 NimbusError::HotspotCreationFailed(format!("Failed to create connection: {}", e))
             })?;
 
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // Wait for connection to activate by polling device state
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if let Ok(devices) = nm.list_wifi_devices().await {
+                if let Some(dev) = devices.iter().find(|d| d.interface == interface) {
+                    if dev.state == nmrs::DeviceState::Activated {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Determine frequency and channel from config
+        let (frequency, channel) = match (&config.band, config.channel) {
+            (Band::Band5Ghz, Some(ch)) => (5000 + ch * 5, ch),
+            (Band::Band5Ghz, None) => (5180, 36),
+            (Band::Band2_4Ghz, Some(ch)) => (2407 + ch * 5, ch),
+            (Band::Band2_4Ghz, None) => (2437, 6),
+            (Band::Auto, Some(ch)) => {
+                if ch >= 36 {
+                    (5000 + ch * 5, ch)
+                } else {
+                    (2407 + ch * 5, ch)
+                }
+            }
+            (Band::Auto, None) => (2437, 6),
+        };
 
         Ok(HotspotInfo {
             interface: interface.to_string(),
             ssid: config.ssid.clone(),
             ip: std::net::Ipv4Addr::new(10, 42, 0, 1),
-            frequency: 2412,
-            channel: 1,
+            frequency,
+            channel,
             started_at: std::time::Instant::now(),
         })
     }
@@ -276,13 +314,15 @@ impl NetworkManagerApi for NmManager {
             match ac {
                 nmrs::ActiveConnection::Wifi(wifi) => {
                     if wifi.id.starts_with("Nimbus-") {
+                        self.deactivate_connection_by_uuid(&wifi.uuid).await?;
                         return Ok(());
                     }
                 }
                 nmrs::ActiveConnection::Wired(wired)
                     if wired.id.starts_with("Nimbus-") => {
-                        return Ok(());
-                    }
+                    self.deactivate_connection_by_uuid(&wired.uuid).await?;
+                    return Ok(());
+                }
                 _ => {}
             }
         }
@@ -300,12 +340,28 @@ impl NetworkManagerApi for NmManager {
                 if wifi.id.starts_with("Nimbus-")
                     && wifi.state == nmrs::ActiveConnectionState::Activated
                 {
+                    let iface = wifi.interface.clone().unwrap_or_default();
+                    let ssid = wifi.ssid.clone();
+
+                    // Try to get actual frequency from the device
+                    let (frequency, channel) = if let Ok(devices) = nm.list_wifi_devices().await {
+                        if let Some(dev) = devices.iter().find(|d| d.interface == iface) {
+                            let freq = dev.active_frequency_mhz.unwrap_or(2412);
+                            let ch = freq_to_channel(freq);
+                            (freq, ch)
+                        } else {
+                            (2412, 1)
+                        }
+                    } else {
+                        (2412, 1)
+                    };
+
                     return Ok(Some(HotspotInfo {
-                        interface: wifi.interface.clone().unwrap_or_default(),
-                        ssid: wifi.ssid.clone(),
+                        interface: iface,
+                        ssid,
                         ip: std::net::Ipv4Addr::new(10, 42, 0, 1),
-                        frequency: 2412,
-                        channel: 1,
+                        frequency,
+                        channel,
                         started_at: std::time::Instant::now(),
                     }));
                 }
@@ -363,7 +419,45 @@ impl NetworkManagerApi for NmManager {
     }
 }
 
+fn freq_to_channel(freq: u32) -> u32 {
+    match freq {
+        2412 => 1,
+        2417 => 2,
+        2422 => 3,
+        2427 => 4,
+        2432 => 5,
+        2437 => 6,
+        2442 => 7,
+        2447 => 8,
+        2452 => 9,
+        2457 => 10,
+        2462 => 11,
+        2467 => 12,
+        2472 => 13,
+        f if (5170..=5825).contains(&f) => (f - 5000) / 5,
+        f if (5955..=7115).contains(&f) => (f - 5950) / 5,
+        _ => 0,
+    }
+}
+
 impl NmManager {
+    async fn deactivate_connection_by_uuid(&self, uuid: &str) -> Result<()> {
+        let output = Command::new("nmcli")
+            .args(["connection", "down", "uuid", uuid])
+            .output()
+            .await
+            .map_err(|e| NimbusError::NftablesError(format!("Failed to run nmcli: {}", e)))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(NimbusError::HotspotCreationFailed(format!(
+                "Failed to deactivate connection: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )))
+        }
+    }
+
     async fn get_phy_name(&self, interface: &str) -> Result<String> {
         let output = Command::new("iw")
             .args(["dev", interface, "info"])

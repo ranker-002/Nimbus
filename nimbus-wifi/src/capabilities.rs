@@ -1,4 +1,3 @@
-
 use tokio::process::Command;
 
 use nimbus_core::error::{NimbusError, Result};
@@ -56,13 +55,21 @@ async fn get_phy_for_interface(interface: &str) -> Result<String> {
 
 fn extract_section<'a>(output: &'a str, header: &str) -> &'a str {
     if let Some(start) = output.find(header) {
-        let rest = &output[start..];
-        for line in rest[header.len()..].lines() {
-            if !line.starts_with(|c: char| c.is_whitespace()) && !line.is_empty() {
-                return &rest[..rest.len() - line.len() - 1];
+        let after_header = &output[start + header.len()..];
+        for (i, line) in after_header.lines().enumerate() {
+            if i == 0 {
+                continue;
+            }
+            if !line.starts_with(char::is_whitespace) && !line.is_empty() {
+                let section_end = output[start + header.len()..]
+                    .lines()
+                    .take(i)
+                    .map(|l| l.len() + 1)
+                    .sum::<usize>();
+                return &output[start..start + header.len() + section_end];
             }
         }
-        rest
+        after_header
     } else {
         ""
     }
@@ -77,7 +84,7 @@ fn parse_iw_output(output: &str) -> IwPhyInfo {
     let combo_text = extract_section(output, "valid interface combinations:");
     info.can_do_sta_and_ap = combo_text.contains("managed")
         && combo_text.contains("AP")
-        && combo_text.contains("#channels <= 1");
+        && (combo_text.contains("#channels <= 1") || combo_text.contains("#{{ 1 }}"));
 
     let feat_text = extract_section(output, "Supported extended features:");
     info.supports_wpa3 = feat_text.contains("SAE") || feat_text.contains("SAE_OFFLOAD");
@@ -85,7 +92,7 @@ fn parse_iw_output(output: &str) -> IwPhyInfo {
     if output.contains("EHT") || output.contains("802.11be") {
         info.supports_wifi_7 = true;
         info.supports_wifi_6 = true;
-    } else if output.contains("HE") || output.contains("802.11ax") {
+    } else if output.contains("[HE]") || output.contains("802.11ax") {
         info.supports_wifi_6 = true;
     }
 
@@ -93,44 +100,61 @@ fn parse_iw_output(output: &str) -> IwPhyInfo {
         info.supports_wifi_6e = true;
     }
 
-    for line in output.lines() {
+    let freq_section = extract_section(output, "Frequencies:");
+    for line in freq_section.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix('*') {
             let rest = rest.trim_start();
             if let Some(freq_str) = rest.strip_suffix("MHz") {
                 let freq: u32 = freq_str.trim().parse().unwrap_or(0);
+                if freq == 0 {
+                    continue;
+                }
+
+                let channel = if let Some(paren_start) = line.find('(') {
+                    if let Some(paren_end) = line[paren_start..].find(')') {
+                        let chan_str = &line[paren_start + 1..paren_start + paren_end];
+                        chan_str.parse::<u32>().unwrap_or(0)
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
+
+                if channel == 0 {
+                    continue;
+                }
+
                 if (2400..=2500).contains(&freq) {
-                    if let Some(chan_line) = output.lines().find(|l| l.contains(&format!("{} MHz", freq))) {
-                        if let Some(paren) = chan_line.find('(') {
-                            if let Some(paren_end) = chan_line[paren..].find(')') {
-                                let chan_str = &chan_line[paren + 1..paren + paren_end];
-                                if let Ok(channel) = chan_str.parse::<u32>() {
-                                    info.channels_2ghz.push(channel);
-                                }
-                            }
-                        }
-                    }
-                } else if (5000..=5900).contains(&freq) {
-                    if let Some(chan_line) = output.lines().find(|l| l.contains(&format!("{} MHz", freq))) {
-                        if let Some(paren) = chan_line.find('(') {
-                            if let Some(paren_end) = chan_line[paren..].find(')') {
-                                let chan_str = &chan_line[paren + 1..paren + paren_end];
-                                if let Ok(channel) = chan_str.parse::<u32>() {
-                                    info.channels_5ghz.push(channel);
-                                }
-                            }
-                        }
-                    }
+                    info.channels_2ghz.push(channel);
+                } else if (5000..=5900).contains(&freq) || (5955..=7115).contains(&freq) {
+                    info.channels_5ghz.push(channel);
                 }
             }
         }
     }
 
     if info.channels_2ghz.is_empty() {
-        info.channels_2ghz = (1..=14).collect();
+        info.channels_2ghz = (1..=13).collect();
     }
     if info.channels_5ghz.is_empty() {
         info.channels_5ghz = vec![36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 149, 153, 157, 161, 165];
+    }
+
+    if let Some(max_pos) = combo_text.find("#max") {
+        let rest = &combo_text[max_pos..];
+        if let Some(brace_start) = rest.find('{') {
+            if let Some(brace_end) = rest[brace_start..].find('}') {
+                let max_str = &rest[brace_start + 1..brace_start + brace_end];
+                if let Ok(max) = max_str.trim().parse::<u32>() {
+                    info.max_sta = Some(max);
+                }
+            }
+        }
+    }
+    if info.max_sta.is_none() {
+        info.max_sta = Some(32);
     }
 
     info

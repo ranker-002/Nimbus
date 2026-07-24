@@ -1,7 +1,6 @@
 use nimbus_core::error::Result;
 use tokio::process::Command;
 
-
 pub async fn scan_available_networks(interface: &str) -> Result<Vec<ScannedNetwork>> {
     let _ = Command::new("iw")
         .args(["dev", interface, "scan"])
@@ -74,7 +73,7 @@ fn parse_iw_scan_dump(output: &str) -> Result<Vec<ScannedNetwork>> {
     Ok(networks)
 }
 
-fn freq_to_channel(freq: u32) -> u32 {
+pub fn freq_to_channel(freq: u32) -> u32 {
     match freq {
         2412 => 1,
         2417 => 2,
@@ -90,6 +89,7 @@ fn freq_to_channel(freq: u32) -> u32 {
         2467 => 12,
         2472 => 13,
         f if (5170..=5825).contains(&f) => (f - 5000) / 5,
+        f if (5955..=7115).contains(&f) => (f - 5950) / 5,
         _ => 0,
     }
 }

@@ -898,14 +898,12 @@ name = "nimbus-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "log",
  "mac_address",
  "rusqlite",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
- "uuid",
  "zbus",
 ]
 
