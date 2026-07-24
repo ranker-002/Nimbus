@@ -1,0 +1,21 @@
+[package]
+name = "nimbus-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nimbus-core = { path = "../nimbus-core" }
+nimbus-network = { path = "../nimbus-network" }
+nimbus-wifi = { path = "../nimbus-wifi" }
+nimbus-backend = { path = "../nimbus-backend" }
+nimbus-settings = { path = "../nimbus-settings" }
+nimbus-telemetry = { path = "../nimbus-telemetry" }
+tokio.workspace = true
+clap = { version = "4", features = ["derive"] }
+log.workspace = true
+env_logger.workspace = true
+
+[[bin]]
+name = "nimbus"
+path = "src/main.rs"

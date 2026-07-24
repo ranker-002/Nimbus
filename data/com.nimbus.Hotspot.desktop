@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Nimbus Hotspot
+Comment=Create and manage Wi-Fi hotspots
+Exec=nimbus-hotspot
+Icon=com.nimbus.Hotspot
+Terminal=false
+Type=Application
+Categories=Network;Utility;
+Keywords=hotspot;wifi;wireless;access-point;
+StartupNotify=true

@@ -1,0 +1,5 @@
+<gresources>
+  <gresource prefix="/com/nimbus/Hotspot">
+    <file alias="style.css">com.nimbus.Hotspot.css</file>
+  </gresource>
+</gresources>

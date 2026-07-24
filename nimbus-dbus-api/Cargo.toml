@@ -1,0 +1,18 @@
+[package]
+name = "nimbus-dbus-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nimbus-core = { path = "../nimbus-core" }
+nimbus-network = { path = "../nimbus-network" }
+nimbus-backend = { path = "../nimbus-backend" }
+tokio.workspace = true
+zbus.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
+[[bin]]
+name = "nimbus-dbus-service"
+path = "src/main.rs"

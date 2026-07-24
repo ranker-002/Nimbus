@@ -1,0 +1,103 @@
+:root {
+    --window-bg-color: #0f1117;
+    --window-fg-color: #e1e4e8;
+    --view-bg-color: #161b22;
+    --view-fg-color: #e1e4e8;
+    --accent-bg-color: #6366f1;
+    --accent-fg-color: #ffffff;
+    --card-bg-color: #1c2128;
+    --card-bg-shade-color: #161b22;
+    --headerbar-bg-color: #0d1117;
+    --headerbar-fg-color: #e1e4e8;
+    --sidebar-bg-color: #0d1117;
+    --sidebar-fg-color: #e1e4e8;
+    --borders-color: #30363d;
+    --destructive-bg-color: #f85149;
+    --destructive-fg-color: #ffffff;
+    --success-bg-color: #3fb950;
+    --success-fg-color: #0d1117;
+    --warning-bg-color: #d29922;
+    --warning-fg-color: #0d1117;
+}
+
+.background {
+    background-color: var(--window-bg-color);
+    color: var(--window-fg-color);
+}
+
+.card {
+    background-color: var(--card-bg-color);
+    border-radius: 12px;
+    border: 1px solid var(--borders-color);
+    padding: 16px;
+}
+
+.card:hover {
+    border-color: var(--accent-bg-color);
+}
+
+.sidebar-item {
+    padding: 8px 12px;
+    border-radius: 8px;
+}
+
+.sidebar-item:selected {
+    background-color: var(--accent-bg-color);
+    color: var(--accent-fg-color);
+}
+
+.title-1 {
+    font-weight: 700;
+    font-size: 24px;
+    color: var(--window-fg-color);
+}
+
+.heading {
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--window-fg-color);
+}
+
+.dim-label {
+    opacity: 0.7;
+}
+
+.success {
+    color: var(--success-bg-color);
+}
+
+.error {
+    color: var(--destructive-bg-color);
+}
+
+.warning {
+    color: var(--warning-bg-color);
+}
+
+.pill {
+    border-radius: 24px;
+    padding: 8px 24px;
+}
+
+.navigation-sidebar {
+    background-color: var(--sidebar-bg-color);
+    color: var(--sidebar-fg-color);
+}
+
+boxed-list {
+    background-color: var(--card-bg-color);
+    border-radius: 12px;
+    border: 1px solid var(--borders-color);
+}
+
+actionbar {
+    background-color: var(--headerbar-bg-color);
+    border-top: 1px solid var(--borders-color);
+}
+
+.toast {
+    background-color: var(--card-bg-color);
+    border-radius: 8px;
+    border: 1px solid var(--borders-color);
+    padding: 8px 16px;
+}

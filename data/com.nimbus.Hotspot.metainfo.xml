@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.nimbus.Hotspot</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Nimbus Hotspot</name>
+  <summary>Modern Wi-Fi hotspot manager for Linux</summary>
+  <description>
+    <p>
+      Nimbus Hotspot transforms your Linux computer into a Wi-Fi access point.
+      Share your internet connection with other devices over Wi-Fi.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Create and manage Wi-Fi hotspots with a modern interface</li>
+      <li>Support for WPA2 and WPA3 security</li>
+      <li>Real-time monitoring of connected devices</li>
+      <li>QR code generation for easy sharing</li>
+      <li>Works with Ethernet, Wi-Fi, and USB tethering</li>
+      <li>Compatible with GNOME, KDE, XFCE, and other desktop environments</li>
+    </ul>
+  </description>
+  <url type="homepage">https://github.com/nimbus-hotspot/nimbus</url>
+  <url type="bugtracker">https://github.com/nimbus-hotspot/nimbus/issues</url>
+  <developer_name>Nimbus Contributors</developer_name>
+  <launchable type="desktop-id">com.nimbus.Hotspot.desktop</launchable>
+  <translation type="gettext">nimbus-hotspot</translation>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-07-24">
+      <description>
+        <p>Initial release of Nimbus Hotspot.</p>
+      </description>
+    </release>
+  </releases>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <branding>
+    <color type="primary" scheme_preference="dark">#6366f1</color>
+    <color type="primary" scheme_preference="light">#818cf8</color>
+  </branding>
+</component>

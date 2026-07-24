@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="com.nimbus.Hotspot" path="/com/nimbus/Hotspot/">
+    <key name="auto-start" type="b">
+      <default>false</default>
+      <summary>Auto-start hotspot on login</summary>
+      <description>Automatically start the last used hotspot when the user logs in</description>
+    </key>
+    <key name="default-band" type="s">
+      <default>'auto'</default>
+      <summary>Default frequency band</summary>
+      <description>The default frequency band for new hotspots (auto, 2.4, 5)</description>
+    </key>
+    <key name="default-security" type="s">
+      <default>'wpa2-wpa3'</default>
+      <summary>Default security mode</summary>
+      <description>The default security mode for new hotspots</description>
+    </key>
+    <key name="max-clients-default" type="u">
+      <default>10</default>
+      <summary>Default maximum clients</summary>
+      <description>The default maximum number of clients per hotspot</description>
+      <range min="1" max="64" />
+    </key>
+    <key name="dark-mode-only" type="b">
+      <default>true</default>
+      <summary>Force dark mode</summary>
+      <description>Always use dark mode regardless of system preference</description>
+    </key>
+    <key name="show-notifications" type="b">
+      <default>true</default>
+      <summary>Show notifications</summary>
+      <description>Show desktop notifications for hotspot events</description>
+    </key>
+  </schema>
+</schemalist>

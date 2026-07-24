@@ -1,0 +1,12 @@
+[package]
+name = "nimbus-wifi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+
+[dependencies]
+nimbus-core = { path = "../nimbus-core" }
+tokio.workspace = true
+qrcode.workspace = true
+log.workspace = true
