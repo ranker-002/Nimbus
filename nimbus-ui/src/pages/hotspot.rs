@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use gtk::glib;
 
 use nimbus_core::types::{Band, HotspotConfig, Security};
 
@@ -15,6 +14,12 @@ pub struct HotspotPage {
     start_button: gtk::Button,
     stop_button: gtk::Button,
     qr_button: gtk::Button,
+}
+
+impl Default for HotspotPage {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HotspotPage {
@@ -47,7 +52,7 @@ impl HotspotPage {
         let security_combo = security_row.1;
         form.append(&security_row.0);
 
-        let channel_row = create_spin_row("Channel (0 = Auto)", 0, 165);
+        let channel_row = create_spin_row("Channel (0 = Auto)", 0.0, 165.0);
         let channel_spin = channel_row.1;
         form.append(&channel_row.0);
 
@@ -107,14 +112,14 @@ impl HotspotPage {
         let ssid = self.ssid_entry.text().to_string();
         let password = self.password_entry.text().to_string();
 
-        let band = match self.band_combo.active() {
+        let band = match self.band_combo.selected() {
             0 => Band::Auto,
             1 => Band::Band2_4Ghz,
             2 => Band::Band5Ghz,
             _ => Band::Auto,
         };
 
-        let security = match self.security_combo.active() {
+        let security = match self.security_combo.selected() {
             0 => Security::Wpa2Wpa3Transition,
             1 => Security::Wpa2,
             2 => Security::Wpa3,
@@ -208,7 +213,7 @@ fn create_combo_row(title: &str, options: &[&str]) -> (gtk::Box, gtk::DropDown) 
     let model = gtk::StringList::new(options);
     let dropdown = gtk::DropDown::builder()
         .model(&model)
-        .active(0)
+        .selected(0)
         .build();
     row.append(&dropdown);
 

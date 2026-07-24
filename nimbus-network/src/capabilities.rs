@@ -172,3 +172,111 @@ fn parse_iw_output(output: &str) -> IwPhyInfo {
 
     info
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_section_found() {
+        let output = "Header1\n  line1\n  line2\nNextHeader\n";
+        let section = extract_section(output, "Header1\n");
+        assert_eq!(section, "Header1\n  line1\n  line2\n");
+    }
+
+    #[test]
+    fn test_extract_section_not_found() {
+        let output = "Some other content";
+        let section = extract_section(output, "Header1");
+        assert_eq!(section, "");
+    }
+
+    #[test]
+    fn test_extract_section_to_end() {
+        let output = "Header1\n  line1\n  line2\n";
+        let section = extract_section(output, "Header1\n");
+        assert!(section.contains("  line1\n  line2\n"));
+    }
+
+    #[test]
+    fn test_parse_iw_output_ap_support() {
+        let output = "Supported interface modes:\n  * AP\n  * managed\n";
+        let info = parse_iw_output(output);
+        assert!(info.supports_ap);
+    }
+
+    #[test]
+    fn test_parse_iw_output_no_ap_support() {
+        let output = "Supported interface modes:\n  * managed\n";
+        let info = parse_iw_output(output);
+        assert!(!info.supports_ap);
+    }
+
+    #[test]
+    fn test_parse_iw_output_wpa3_support() {
+        let output = "Supported extended features:\n  SAE\n";
+        let info = parse_iw_output(output);
+        assert!(info.supports_wpa3);
+    }
+
+    #[test]
+    fn test_parse_iw_output_wifi6_support() {
+        let output = "[HE] some feature\n";
+        let info = parse_iw_output(output);
+        assert!(info.supports_wifi_6);
+        assert!(!info.supports_wifi_7);
+    }
+
+    #[test]
+    fn test_parse_iw_output_wifi6e_support() {
+        let output = "6 GHz support\n";
+        let info = parse_iw_output(output);
+        assert!(info.supports_wifi_6e);
+    }
+
+    #[test]
+    fn test_parse_iw_output_wifi7_support() {
+        let output = "EHT support\n";
+        let info = parse_iw_output(output);
+        assert!(info.supports_wifi_7);
+        assert!(info.supports_wifi_6); // WiFi 7 implies WiFi 6
+    }
+
+    #[test]
+    fn test_parse_iw_output_no_false_positive_the() {
+        let output = "THE quick brown fox\n";
+        let info = parse_iw_output(output);
+        assert!(!info.supports_wifi_6);
+    }
+
+    #[test]
+    fn test_parse_iw_output_channels() {
+        let output = "Frequencies:\n  * 2412 MHz (1)\n  * 2437 MHz (6)\n  * 5180 MHz (36)\n";
+        let info = parse_iw_output(output);
+        assert!(info.channels_2ghz.contains(&1));
+        assert!(info.channels_2ghz.contains(&6));
+        assert!(info.channels_5ghz.contains(&36));
+    }
+
+    #[test]
+    fn test_parse_iw_output_sta_ap_combo() {
+        let output = "valid interface combinations:\n  * #{ managed } <= 1, #{ AP } <= 1, #{ } <= 1, total <= 2, #channels <= 1\n";
+        let info = parse_iw_output(output);
+        assert!(info.can_do_sta_and_ap);
+    }
+
+    #[test]
+    fn test_parse_iw_output_max_sta() {
+        let output = "valid interface combinations:\n  * #{ managed } <= 1, #{ AP } <= 1, #max{ 8 }\n";
+        let info = parse_iw_output(output);
+        assert_eq!(info.max_sta, 8);
+    }
+
+    #[test]
+    fn test_parse_iw_output_default_channels() {
+        let output = "";
+        let info = parse_iw_output(output);
+        assert_eq!(info.channels_2ghz.len(), 13);
+        assert!(!info.channels_5ghz.is_empty());
+    }
+}

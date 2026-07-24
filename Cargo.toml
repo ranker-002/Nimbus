@@ -9,6 +9,7 @@ members = [
     "nimbus-backend",
     "nimbus-cli",
     "nimbus-dbus-api",
+    "nimbus-ui",
 ]
 
 [workspace.package]
@@ -41,7 +42,6 @@ serde_json = "1.0"
 
 # Error handling
 thiserror = "2"
-anyhow = "1"
 
 # Logging
 log = "0.4"
@@ -57,10 +57,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # MAC lookup
-mac_address = "1.1"
-
-# Regex for iw parsing
-regex = "1"
+mac_address = { version = "1.1", features = ["serde"] }
 
 # Testing
 mockall = "0.13"

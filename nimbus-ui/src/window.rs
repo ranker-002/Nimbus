@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use gtk::{gio, glib};
 
 use crate::app::NimbusApp;
 use crate::navigation::NimbusNavigationView;
@@ -7,7 +6,7 @@ use crate::navigation::NimbusNavigationView;
 pub struct NimbusWindow;
 
 impl NimbusWindow {
-    pub fn new(app: &NimbusApp) -> adw::ApplicationWindow {
+    pub fn create(app: &NimbusApp) -> adw::ApplicationWindow {
         let nav = NimbusNavigationView::new();
 
         let toolbar_view = adw::ToolbarView::new();

@@ -8,6 +8,7 @@ use nimbus_core::types::DashboardStats;
 mod imp {
     use super::*;
     use gtk::glib::Properties;
+    use gtk::glib::object::ObjectExt;
     use std::cell::Cell;
 
     #[derive(Properties, Default)]
@@ -39,6 +40,12 @@ glib::wrapper! {
     pub struct DashboardViewModel(ObjectSubclass<imp::DashboardViewModel>);
 }
 
+impl Default for DashboardViewModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DashboardViewModel {
     pub fn new() -> Self {
         glib::Object::builder().build()
@@ -47,13 +54,13 @@ impl DashboardViewModel {
     pub fn update_stats(&self, stats: &DashboardStats) {
         self.set_stations(stats.connected_stations);
 
-        self.set_upload_rate(&format_rate(stats.bandwidth.tx_rate));
-        self.set_download_rate(&format_rate(stats.bandwidth.rx_rate));
+        self.set_upload_rate(format_rate(stats.bandwidth.tx_rate));
+        self.set_download_rate(format_rate(stats.bandwidth.rx_rate));
 
         let hours = stats.uptime_secs / 3600;
         let mins = (stats.uptime_secs % 3600) / 60;
         let secs = stats.uptime_secs % 60;
-        self.set_uptime(&format!("{:02}:{:02}:{:02}", hours, mins, secs));
+        self.set_uptime(format!("{:02}:{:02}:{:02}", hours, mins, secs));
     }
 }
 

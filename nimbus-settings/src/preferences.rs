@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use nimbus_core::error::Result;
+use nimbus_core::error::{NimbusError, Result};
 use nimbus_core::types::{Band, Security};
 
 const CONFIG_DIR: &str = ".config/nimbus-hotspot";
@@ -33,15 +33,19 @@ impl Default for AppPreferences {
     }
 }
 
-fn prefs_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+fn prefs_path() -> Result<std::path::PathBuf> {
+    let home = std::env::var("HOME")
+        .map_err(|_| NimbusError::ConfigError("HOME environment variable not set".into()))?;
     let dir = std::path::PathBuf::from(home).join(CONFIG_DIR);
-    let _ = std::fs::create_dir_all(&dir);
-    dir.join(PREFS_FILE)
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join(PREFS_FILE))
 }
 
 pub fn load_preferences() -> AppPreferences {
-    let path = prefs_path();
+    let path = match prefs_path() {
+        Ok(p) => p,
+        Err(_) => return AppPreferences::default(),
+    };
     if !path.exists() {
         return AppPreferences::default();
     }
@@ -52,7 +56,7 @@ pub fn load_preferences() -> AppPreferences {
 }
 
 pub fn save_preferences(prefs: &AppPreferences) -> Result<()> {
-    let path = prefs_path();
+    let path = prefs_path()?;
     let data = serde_json::to_string_pretty(prefs)?;
     std::fs::write(&path, data)?;
     Ok(())

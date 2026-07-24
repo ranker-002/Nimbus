@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use gtk::{gio, glib};
 
 use crate::pages::dashboard::DashboardPage;
 use crate::pages::hotspot::HotspotPage;
@@ -7,8 +6,13 @@ use crate::pages::devices::DevicesPage;
 use crate::pages::settings::SettingsPage;
 
 pub struct NimbusNavigationView {
-    nav_view: adw::NavigationView,
     split_view: adw::NavigationSplitView,
+}
+
+impl Default for NimbusNavigationView {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NimbusNavigationView {
@@ -27,14 +31,16 @@ impl NimbusNavigationView {
         let content_page = adw::NavigationPage::builder()
             .title("Dashboard")
             .tag("dashboard")
-            .child(&DashboardPage::new().widget())
+            .child(DashboardPage::new().widget())
             .build();
         nav_view.push(&content_page);
 
-        split_view.set_content(Some(&nav_view));
+        let nav_page = adw::NavigationPage::builder()
+            .child(&nav_view)
+            .build();
+        split_view.set_content(Some(&nav_page));
 
         Self {
-            nav_view,
             split_view,
         }
     }
@@ -61,32 +67,32 @@ fn create_sidebar(nav_view: &adw::NavigationView) -> adw::NavigationPage {
 
     let nav_view_clone = nav_view.clone();
     listbox.connect_row_activated(move |_, row| {
-        if let Some(tag) = row.widget_name().as_deref() {
-            let page = match tag {
+        let tag = row.widget_name();
+        let tag = tag.as_str();
+        let page = match tag {
                 "dashboard" => adw::NavigationPage::builder()
                     .title("Dashboard")
                     .tag("dashboard")
-                    .child(&DashboardPage::new().widget())
+                    .child(DashboardPage::new().widget())
                     .build(),
                 "hotspot" => adw::NavigationPage::builder()
                     .title("Hotspot")
                     .tag("hotspot")
-                    .child(&HotspotPage::new().widget())
+                    .child(HotspotPage::new().widget())
                     .build(),
                 "devices" => adw::NavigationPage::builder()
                     .title("Devices")
                     .tag("devices")
-                    .child(&DevicesPage::new().widget())
+                    .child(DevicesPage::new().widget())
                     .build(),
                 "settings" => adw::NavigationPage::builder()
                     .title("Settings")
                     .tag("settings")
-                    .child(&SettingsPage::new().widget())
+                    .child(SettingsPage::new().widget())
                     .build(),
                 _ => return,
             };
             nav_view_clone.push(&page);
-        }
     });
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);

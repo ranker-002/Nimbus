@@ -1,4 +1,5 @@
 use nimbus_core::error::Result;
+use nimbus_core::types::ScannedNetwork;
 use tokio::process::Command;
 
 pub async fn scan_available_networks(interface: &str) -> Result<Vec<ScannedNetwork>> {
@@ -16,15 +17,6 @@ pub async fn scan_available_networks(interface: &str) -> Result<Vec<ScannedNetwo
     parse_iw_scan_dump(&stdout)
 }
 
-#[derive(Debug, Clone)]
-pub struct ScannedNetwork {
-    pub ssid: String,
-    pub bssid: String,
-    pub frequency: u32,
-    pub signal_dbm: i32,
-    pub channel: u32,
-}
-
 fn parse_iw_scan_dump(output: &str) -> Result<Vec<ScannedNetwork>> {
     let mut networks = Vec::new();
     let mut current_bssid = String::new();
@@ -33,7 +25,8 @@ fn parse_iw_scan_dump(output: &str) -> Result<Vec<ScannedNetwork>> {
     let mut current_ssid = String::new();
 
     for line in output.lines() {
-        if let Some(bssid) = line.strip_prefix("\tBSS ") {
+        let trimmed = line.trim_start();
+        if let Some(bssid) = trimmed.strip_prefix("BSS ") {
             if !current_bssid.is_empty() && !current_ssid.is_empty() {
                 networks.push(ScannedNetwork {
                     ssid: current_ssid.clone(),
@@ -47,15 +40,15 @@ fn parse_iw_scan_dump(output: &str) -> Result<Vec<ScannedNetwork>> {
             current_ssid.clear();
             current_freq = 0;
             current_signal = 0;
-        } else if let Some(freq) = line.strip_prefix("\tfreq: ") {
+        } else if let Some(freq) = trimmed.strip_prefix("freq: ") {
             current_freq = freq.trim().parse().unwrap_or(0);
-        } else if let Some(signal) = line.strip_prefix("\tsignal: ") {
+        } else if let Some(signal) = trimmed.strip_prefix("signal: ") {
             current_signal = signal
                 .trim()
                 .strip_suffix(" dBm")
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0);
-        } else if let Some(ssid) = line.strip_prefix("\tSSID: ") {
+        } else if let Some(ssid) = trimmed.strip_prefix("SSID: ") {
             current_ssid = ssid.trim().to_string();
         }
     }
@@ -91,5 +84,66 @@ pub fn freq_to_channel(freq: u32) -> u32 {
         f if (5170..=5825).contains(&f) => (f - 5000) / 5,
         f if (5955..=7115).contains(&f) => (f - 5950) / 5,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_freq_to_channel_2_4ghz() {
+        assert_eq!(freq_to_channel(2412), 1);
+        assert_eq!(freq_to_channel(2437), 6);
+        assert_eq!(freq_to_channel(2462), 11);
+        assert_eq!(freq_to_channel(2472), 13);
+    }
+
+    #[test]
+    fn test_freq_to_channel_5ghz() {
+        assert_eq!(freq_to_channel(5180), 36);
+        assert_eq!(freq_to_channel(5240), 48);
+        assert_eq!(freq_to_channel(5745), 149);
+        assert_eq!(freq_to_channel(5825), 165);
+    }
+
+    #[test]
+    fn test_freq_to_channel_6ghz() {
+        assert_eq!(freq_to_channel(5955), 1);
+        assert_eq!(freq_to_channel(6035), 17);
+        assert_eq!(freq_to_channel(6115), 33);
+    }
+
+    #[test]
+    fn test_freq_to_channel_unknown() {
+        assert_eq!(freq_to_channel(0), 0);
+        assert_eq!(freq_to_channel(1000), 0);
+        assert_eq!(freq_to_channel(9999), 0);
+    }
+
+    #[test]
+    fn test_parse_iw_scan_dump() {
+        let output = "BSS 00:11:22:33:44:55 (on wlan0)\n\tfreq: 2437\n\tsignal: -50.00 dBm\n\tSSID: TestNetwork\nBSS aa:bb:cc:dd:ee:ff (on wlan0)\n\tfreq: 5180\n\tsignal: -60.00 dBm\n\tSSID: AnotherNetwork\n";
+        let networks = parse_iw_scan_dump(output).unwrap();
+        assert_eq!(networks.len(), 2);
+        assert_eq!(networks[0].ssid, "TestNetwork");
+        assert_eq!(networks[0].bssid, "00:11:22:33:44:55");
+        assert_eq!(networks[0].frequency, 2437);
+        assert_eq!(networks[0].channel, 6);
+        assert_eq!(networks[1].ssid, "AnotherNetwork");
+    }
+
+    #[test]
+    fn test_parse_iw_scan_dump_empty() {
+        let output = "";
+        let networks = parse_iw_scan_dump(output).unwrap();
+        assert!(networks.is_empty());
+    }
+
+    #[test]
+    fn test_parse_iw_scan_dump_hidden_ssid() {
+        let output = "BSS 00:11:22:33:44:55 (on wlan0)\n\tfreq: 2437\n\tsignal: -50.00 dBm\n";
+        let networks = parse_iw_scan_dump(output).unwrap();
+        assert!(networks.is_empty());
     }
 }

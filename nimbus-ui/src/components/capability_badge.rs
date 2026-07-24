@@ -1,10 +1,15 @@
 use adw::prelude::*;
-use gtk::glib;
 
 use nimbus_core::types::AdapterCapabilities;
 
 pub struct CapabilityBadge {
     box_widget: gtk::Box,
+}
+
+impl Default for CapabilityBadge {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CapabilityBadge {

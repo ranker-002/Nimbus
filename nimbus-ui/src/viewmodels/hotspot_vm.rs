@@ -6,6 +6,7 @@ use gtk::glib;
 mod imp {
     use super::*;
     use gtk::glib::Properties;
+    use gtk::glib::object::ObjectExt;
     use std::cell::Cell;
 
     #[derive(Properties, Default)]
@@ -33,6 +34,12 @@ mod imp {
 
 glib::wrapper! {
     pub struct HotspotViewModel(ObjectSubclass<imp::HotspotViewModel>);
+}
+
+impl Default for HotspotViewModel {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HotspotViewModel {

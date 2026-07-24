@@ -1,11 +1,10 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::sync::{mpsc, watch, Mutex};
 
 use nimbus_core::events::{BackendCommand, ToastKind, UiEvent};
-use nimbus_core::types::{
-    BandwidthSample, DashboardStats, HotspotState,
-};
+use nimbus_core::types::{BandwidthSample, DashboardStats, HotspotState};
 use nimbus_network::traits::NetworkManagerApi;
 
 use crate::firewall::FirewallManager;
@@ -16,6 +15,7 @@ pub struct Orchestrator {
     state_tx: watch::Sender<HotspotState>,
     event_tx: mpsc::Sender<UiEvent>,
     current_interface: Mutex<Option<String>>,
+    started_at: Mutex<Option<Instant>>,
 }
 
 impl Orchestrator {
@@ -30,6 +30,7 @@ impl Orchestrator {
             state_tx,
             event_tx,
             current_interface: Mutex::new(None),
+            started_at: Mutex::new(None),
         }
     }
 
@@ -61,20 +62,26 @@ impl Orchestrator {
 
         match self.nm.create_hotspot(&config, &interface).await {
             Ok(info) => {
-                if let Err(e) = self
-                    .firewall
-                    .setup_nat(&interface, &self.get_upstream().await)
-                    .await
-                {
+                let upstream = self.get_upstream().await;
+                if let Err(e) = self.firewall.setup_nat(&interface, &upstream).await {
+                    let _ = self
+                        .nm
+                        .stop_hotspot()
+                        .await;
+                    let _ = self
+                        .state_tx
+                        .send(HotspotState::Error(format!("NAT setup failed: {}", e)));
                     let _ = self
                         .event_tx
                         .send(UiEvent::ShowToast {
-                            message: format!("Firewall warning: {}", e),
-                            kind: ToastKind::Warning,
+                            message: format!("Failed to setup NAT: {}", e),
+                            kind: ToastKind::Error,
                         })
                         .await;
+                    return;
                 }
 
+                *self.started_at.lock().await = Some(Instant::now());
                 let _ = self
                     .state_tx
                     .send(HotspotState::Active(info.ssid.clone()));
@@ -113,6 +120,7 @@ impl Orchestrator {
 
         match self.nm.stop_hotspot().await {
             Ok(()) => {
+                *self.started_at.lock().await = None;
                 let _ = self.state_tx.send(HotspotState::Inactive);
                 let _ = self
                     .event_tx
@@ -172,13 +180,48 @@ impl Orchestrator {
     }
 
     async fn scan_networks(&self) {
-        let _ = self
-            .event_tx
-            .send(UiEvent::ShowToast {
-                message: "Scanning...".into(),
-                kind: ToastKind::Info,
-            })
-            .await;
+        let interface = self.current_interface.lock().await.clone();
+        let interface = match interface {
+            Some(iface) => iface,
+            None => {
+                let _ = self
+                    .event_tx
+                    .send(UiEvent::ShowToast {
+                        message: "No active hotspot interface".into(),
+                        kind: ToastKind::Warning,
+                    })
+                    .await;
+                return;
+            }
+        };
+
+        match nimbus_wifi::scanner::scan_available_networks(&interface).await {
+            Ok(networks) => {
+                let scanned: Vec<nimbus_core::types::ScannedNetwork> = networks
+                    .into_iter()
+                    .map(|n| nimbus_core::types::ScannedNetwork {
+                        ssid: n.ssid,
+                        bssid: n.bssid,
+                        frequency: n.frequency,
+                        signal_dbm: n.signal_dbm,
+                        channel: n.channel,
+                    })
+                    .collect();
+                let _ = self
+                    .event_tx
+                    .send(UiEvent::ScannedNetworks(scanned))
+                    .await;
+            }
+            Err(e) => {
+                let _ = self
+                    .event_tx
+                    .send(UiEvent::ShowToast {
+                        message: format!("Scan failed: {}", e),
+                        kind: ToastKind::Error,
+                    })
+                    .await;
+            }
+        }
     }
 
     async fn detect_interfaces(&self) {
@@ -229,10 +272,17 @@ impl Orchestrator {
                     total_tx: 0,
                 });
 
+            let uptime_secs = self
+                .started_at
+                .lock()
+                .await
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
+
             return Some(DashboardStats {
                 connected_stations: stations.len() as u32,
                 bandwidth,
-                uptime_secs: 0,
+                uptime_secs,
             });
         }
         None

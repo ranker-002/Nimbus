@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use gtk::glib;
 
 use nimbus_core::types::HotspotState;
 
@@ -8,6 +7,12 @@ pub struct StatusCard {
     status_icon: gtk::Image,
     status_label: gtk::Label,
     details_label: gtk::Label,
+}
+
+impl Default for StatusCard {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StatusCard {
@@ -48,32 +53,32 @@ impl StatusCard {
         match state {
             HotspotState::Inactive => {
                 self.status_icon
-                    .set_from_icon_name(Some("network-offline-symbolic"));
+                    .set_icon_name(Some("network-offline-symbolic"));
                 self.status_label.set_text("Inactive");
                 self.details_label.set_text("No hotspot active");
             }
             HotspotState::Starting => {
                 self.status_icon
-                    .set_from_icon_name(Some("network-wireless-acquiring-symbolic"));
+                    .set_icon_name(Some("network-wireless-acquiring-symbolic"));
                 self.status_label.set_text("Starting...");
                 self.details_label.set_text("Configuring hotspot");
             }
             HotspotState::Active(ssid) => {
                 self.status_icon
-                    .set_from_icon_name(Some("network-wireless-signal-excellent-symbolic"));
+                    .set_icon_name(Some("network-wireless-signal-excellent-symbolic"));
                 self.status_label.set_text("Active");
                 self.details_label
                     .set_text(&format!("Hotspot: {}", ssid));
             }
             HotspotState::Stopping => {
                 self.status_icon
-                    .set_from_icon_name(Some("network-wireless-disconnecting-symbolic"));
+                    .set_icon_name(Some("network-wireless-disconnecting-symbolic"));
                 self.status_label.set_text("Stopping...");
                 self.details_label.set_text("Shutting down hotspot");
             }
             HotspotState::Error(msg) => {
                 self.status_icon
-                    .set_from_icon_name(Some("dialog-error-symbolic"));
+                    .set_icon_name(Some("dialog-error-symbolic"));
                 self.status_label.set_text("Error");
                 self.details_label.set_text(msg);
             }

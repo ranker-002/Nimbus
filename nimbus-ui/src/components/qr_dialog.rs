@@ -4,7 +4,7 @@ use gtk::glib;
 use nimbus_core::types::HotspotConfig;
 use nimbus_wifi::qr::generate_wifi_qr;
 
-pub fn show_qr_dialog(parent: &impl IsA<gtk::Window>, config: &HotspotConfig) {
+pub fn show_qr_dialog(parent: &impl IsA<gtk::Widget>, config: &HotspotConfig) {
     let dialog = adw::Dialog::builder()
         .title("Wi-Fi QR Code")
         .content_width(350)
@@ -34,12 +34,7 @@ pub fn show_qr_dialog(parent: &impl IsA<gtk::Window>, config: &HotspotConfig) {
                 .build();
 
             let bytes = glib::Bytes::from(svg.as_bytes());
-            let stream = gtk::gio::MemoryInputStream::from_bytes(&bytes);
-            let texture = gtk::gdk::Texture::from_stream(
-                &stream,
-                None::<&gtk::gio::Cancellable>,
-            )
-            .ok();
+            let texture = gtk::gdk::Texture::from_bytes(&bytes).ok();
 
             if let Some(texture) = texture {
                 svg_widget.set_paintable(Some(&texture));
@@ -66,6 +61,7 @@ pub fn show_qr_dialog(parent: &impl IsA<gtk::Window>, config: &HotspotConfig) {
     content.append(&close_button);
 
     dialog.set_child(Some(&content));
-    close_button.connect_clicked(move |_| dialog.close());
+    let dialog_clone = dialog.clone();
+    close_button.connect_clicked(move |_| { dialog_clone.close(); });
     dialog.present(Some(parent));
 }

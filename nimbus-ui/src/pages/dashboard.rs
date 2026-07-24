@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use gtk::glib;
 
 use nimbus_core::types::DashboardStats;
 
@@ -10,6 +9,12 @@ pub struct DashboardPage {
     upload_label: gtk::Label,
     download_label: gtk::Label,
     uptime_label: gtk::Label,
+}
+
+impl Default for DashboardPage {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DashboardPage {

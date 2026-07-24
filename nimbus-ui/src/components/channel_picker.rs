@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use gtk::glib;
 
 use nimbus_core::types::Band;
 
@@ -7,6 +6,12 @@ pub struct ChannelPicker {
     box_widget: gtk::Box,
     band_combo: gtk::DropDown,
     channel_spin: gtk::SpinButton,
+}
+
+impl Default for ChannelPicker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ChannelPicker {
@@ -23,7 +28,7 @@ impl ChannelPicker {
         let band_model = gtk::StringList::new(&["Auto", "2.4 GHz", "5 GHz"]);
         let band_combo = gtk::DropDown::builder()
             .model(&band_model)
-            .active(0)
+            .selected(0)
             .build();
         box_widget.append(&band_combo);
 
@@ -53,7 +58,7 @@ impl ChannelPicker {
     }
 
     pub fn get_band(&self) -> Band {
-        match self.band_combo.active() {
+        match self.band_combo.selected() {
             0 => Band::Auto,
             1 => Band::Band2_4Ghz,
             2 => Band::Band5Ghz,

@@ -24,7 +24,7 @@ mod imp {
             let window = if let Some(w) = app.active_window() {
                 w
             } else {
-                NimbusWindow::new(&*app).upcast()
+                NimbusWindow::create(&app).upcast()
             };
             window.present();
         }
@@ -39,6 +39,12 @@ glib::wrapper! {
         @implements gio::ActionGroup, gio::ActionMap;
 }
 
+impl Default for NimbusApp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NimbusApp {
     pub fn new() -> Self {
         glib::Object::builder()
@@ -51,7 +57,7 @@ impl NimbusApp {
     pub fn run(&self) {
         self.setup_css();
         self.setup_actions();
-        glib::ApplicationExtManual::run(self);
+        gio::prelude::ApplicationExtManual::run(self);
     }
 
     fn setup_css(&self) {

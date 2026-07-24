@@ -1,8 +1,6 @@
 use adw::prelude::*;
-use gtk::glib;
 
 use nimbus_core::types::StationInfo;
-use nimbus_core::constants::DEFAULT_COUNTRY;
 
 pub fn create_station_row_widget(station: &StationInfo) -> adw::ActionRow {
     let mac_str = format!("{}", station.mac);

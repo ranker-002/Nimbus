@@ -1,8 +1,13 @@
 use adw::prelude::*;
-use gtk::glib;
 
 pub struct SettingsPage {
     main_box: gtk::Box,
+}
+
+impl Default for SettingsPage {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SettingsPage {

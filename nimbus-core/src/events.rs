@@ -1,6 +1,6 @@
 use crate::types::{
     AdapterCapabilities, BandwidthSample, DashboardStats, HotspotInfo, HotspotState,
-    NetworkInterface, Page, StationInfo,
+    NetworkInterface, Page, ScannedNetwork, StationInfo,
 };
 
 #[derive(Debug, Clone)]
@@ -10,6 +10,7 @@ pub enum UiEvent {
     StatsUpdated(DashboardStats),
     AdapterInfo(AdapterCapabilities),
     InterfacesDetected(Vec<NetworkInterface>),
+    ScannedNetworks(Vec<ScannedNetwork>),
     ErrorOccurred(String),
     ShowToast {
         message: String,

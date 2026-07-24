@@ -1,9 +1,14 @@
 use adw::prelude::*;
-use gtk::glib;
 
 pub struct FirstRunPage {
     main_box: gtk::Box,
     start_button: gtk::Button,
+}
+
+impl Default for FirstRunPage {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl FirstRunPage {

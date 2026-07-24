@@ -59,7 +59,7 @@ impl fmt::Display for Ipv4Method {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HotspotConfig {
     pub ssid: String,
     pub password: String,
@@ -180,7 +180,7 @@ impl PartialEq for HotspotInfo {
 
 impl Eq for HotspotInfo {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StationInfo {
     pub mac: MacAddress,
     pub ip: Option<Ipv4Addr>,
@@ -274,4 +274,192 @@ pub struct DashboardStats {
     pub connected_stations: u32,
     pub bandwidth: BandwidthSample,
     pub uptime_secs: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScannedNetwork {
+    pub ssid: String,
+    pub bssid: String,
+    pub frequency: u32,
+    pub signal_dbm: i32,
+    pub channel: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_config() -> HotspotConfig {
+        HotspotConfig {
+            ssid: "TestNetwork".to_string(),
+            password: "password123".to_string(),
+            band: Band::Auto,
+            channel: None,
+            country_code: "US".to_string(),
+            security: Security::Wpa2,
+            hidden: false,
+            max_clients: Some(10),
+            client_isolation: false,
+            ipv4_method: Ipv4Method::Shared,
+            auto_start: false,
+        }
+    }
+
+    #[test]
+    fn test_valid_config_passes_validation() {
+        let config = valid_config();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_empty_ssid_fails() {
+        let mut config = valid_config();
+        config.ssid = String::new();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_ssid_too_long_fails() {
+        let mut config = valid_config();
+        config.ssid = "A".repeat(MAX_SSID_LEN + 1);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_ssid_max_length_passes() {
+        let mut config = valid_config();
+        config.ssid = "A".repeat(MAX_SSID_LEN);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_password_too_short_fails() {
+        let mut config = valid_config();
+        config.password = "short".to_string();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_password_too_long_fails() {
+        let mut config = valid_config();
+        config.password = "A".repeat(MAX_PASSWORD_LEN + 1);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_password_min_length_passes() {
+        let mut config = valid_config();
+        config.password = "A".repeat(MIN_PASSWORD_LEN);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_password_max_length_passes() {
+        let mut config = valid_config();
+        config.password = "A".repeat(MAX_PASSWORD_LEN);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_open_network_no_password_required() {
+        let mut config = valid_config();
+        config.security = Security::Open;
+        config.password = String::new();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_max_clients_exceeded_fails() {
+        let mut config = valid_config();
+        config.max_clients = Some(MAX_CLIENTS_MAX + 1);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_max_clients_at_limit_passes() {
+        let mut config = valid_config();
+        config.max_clients = Some(MAX_CLIENTS_MAX);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_invalid_channel_2_4ghz_fails() {
+        let mut config = valid_config();
+        config.band = Band::Band2_4Ghz;
+        config.channel = Some(14);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_valid_channel_2_4ghz_passes() {
+        let mut config = valid_config();
+        config.band = Band::Band2_4Ghz;
+        config.channel = Some(6);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_invalid_channel_5ghz_fails() {
+        let mut config = valid_config();
+        config.band = Band::Band5Ghz;
+        config.channel = Some(37);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_valid_channel_5ghz_passes() {
+        let mut config = valid_config();
+        config.band = Band::Band5Ghz;
+        config.channel = Some(36);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_auto_band_any_channel_passes() {
+        let mut config = valid_config();
+        config.band = Band::Auto;
+        config.channel = Some(100);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_equality() {
+        let config1 = valid_config();
+        let config2 = valid_config();
+        assert_eq!(config1, config2);
+    }
+
+    #[test]
+    fn test_config_clone() {
+        let config1 = valid_config();
+        let config2 = config1.clone();
+        assert_eq!(config1, config2);
+    }
+
+    #[test]
+    fn test_hotspot_state_default() {
+        assert_eq!(HotspotState::default(), HotspotState::Inactive);
+    }
+
+    #[test]
+    fn test_hotspot_state_equality() {
+        assert_eq!(HotspotState::Inactive, HotspotState::Inactive);
+        assert_eq!(HotspotState::Active("test".into()), HotspotState::Active("test".into()));
+        assert_ne!(HotspotState::Inactive, HotspotState::Active("test".into()));
+    }
+
+    #[test]
+    fn test_band_display() {
+        assert_eq!(Band::Band2_4Ghz.to_string(), "2.4 GHz");
+        assert_eq!(Band::Band5Ghz.to_string(), "5 GHz");
+        assert_eq!(Band::Auto.to_string(), "Auto");
+    }
+
+    #[test]
+    fn test_security_display() {
+        assert_eq!(Security::Open.to_string(), "Open");
+        assert_eq!(Security::Wpa2.to_string(), "WPA2");
+        assert_eq!(Security::Wpa3.to_string(), "WPA3");
+        assert_eq!(Security::Wpa2Wpa3Transition.to_string(), "WPA2/WPA3");
+    }
 }

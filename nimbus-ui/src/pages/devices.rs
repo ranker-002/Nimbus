@@ -1,5 +1,4 @@
 use adw::prelude::*;
-use gtk::glib;
 
 use nimbus_core::types::StationInfo;
 
@@ -7,6 +6,12 @@ pub struct DevicesPage {
     main_box: gtk::Box,
     list: gtk::ListBox,
     count_label: gtk::Label,
+}
+
+impl Default for DevicesPage {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DevicesPage {

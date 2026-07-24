@@ -8,6 +8,7 @@ use nimbus_core::types::StationInfo;
 mod imp {
     use super::*;
     use gtk::glib::Properties;
+    use gtk::glib::object::ObjectExt;
 
     #[derive(Properties, Default)]
     #[properties(wrapper_type = super::DevicesViewModel)]
@@ -38,6 +39,12 @@ impl imp::DevicesViewModel {
 
 glib::wrapper! {
     pub struct DevicesViewModel(ObjectSubclass<imp::DevicesViewModel>);
+}
+
+impl Default for DevicesViewModel {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DevicesViewModel {
