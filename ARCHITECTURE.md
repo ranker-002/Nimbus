@@ -15,17 +15,17 @@ Nimbus Hotspot is a native Linux application for creating and managing Wi-Fi hot
 | Language | Rust | Memory safety, zero-cost abstractions, excellent async ecosystem |
 | Async runtime | Tokio (background) + GLib main loop (UI) | Tokio for I/O-bound backend; GLib for GTK event loop. Never `#[tokio::main]` |
 | IPC to NM | zbus 5.x (via `nmrs` crate) | nmrs wraps NM D-Bus API with async Rust. Battle-tested in Pop!_OS COSMIC |
-| UI framework | GTK4 + Libadwaita | Native GNOME integration, adaptive layouts, dark mode built-in |
-| UI pattern | MVPVM (Model-View-Presenter-ViewModel) | Clean separation, testable model layer, property binding |
+| UI framework | GTK4 + Libadwaita | Native GNOME integration, adaptive layouts |
+| UI pattern | Widgets owned by `NimbusWindow`, events over a channel | One-way backend → UI event flow, no shared mutable state |
 | Firewall | nftables (via `nft` CLI or direct netlink) | Modern replacement for iptables, used by NM 1.30+ |
-| QR codes | `qrcode` crate | Pure Rust, SVG/PNG output, no external deps |
-| Config | GSettings (via `gio::Settings`) | Standard GNOME config, auto-persisted, D-Bus accessible |
-| Build | Meson + Cargo | Meson for Flatpak/system install, Cargo for Rust build |
-| Package | Flatpak (primary), distro packages | Covers all target distros |
+| QR codes | `qrcode` crate | Pure Rust, SVG/terminal output, no external deps |
+| Config | JSON files under `~/.config/nimbus-hotspot/` | Simple, inspectable, no schema daemon needed |
+| Build | Cargo (Meson wrapper for install) | Cargo for the Rust build, Meson for binary/data installation |
+| Package | Distro packages / source install | Nothing in the tree depends on Flatpak |
 | Crate for NM | `nmrs` 3.4+ | High-level, async-first, used by COSMIC desktop |
-| Capabilities | `iw list` parsing + nl80211 netlink | Reliable detection of AP mode, WPA3, WiFi 6/6E/7 |
-| DHCP/DNS | NM internal dnsmasq (via `ipv4.method=shared`) | Zero config — NM spawns dnsmasq automatically |
-| NAT | NM auto-configured + nftables rules | NM sets up masquerade when `ipv4.method=shared` |
+| Capabilities | `iw` parsing, with a conservative fallback | Reliable detection of AP mode, WPA3, WiFi 6/6E/7 |
+| DHCP/DNS | NM internal dnsmasq (`ipv4.method=shared`), or explicit dnsmasq for the shared AP | Zero config on the NM path |
+| NAT | NM auto-configured, or nftables for the shared AP | NM sets up masquerade when `ipv4.method=shared` |
 
 ---
 
@@ -108,7 +108,6 @@ pub struct HotspotConfig {
     pub hidden: bool,
     pub max_clients: Option<u32>,
     pub client_isolation: bool,
-    pub ipv4_method: Ipv4Method,
     pub auto_start: bool,
 }
 
@@ -343,49 +342,33 @@ pub fn generate_wifi_qr(
 
 ### 4.4 Settings Module (`settings/`)
 
-Persistent configuration via GSettings.
+Persistent configuration via JSON files under `~/.config/nimbus-hotspot/`.
 
 ```
 settings/
 ├── mod.rs
-├── schema.rs         # GSettings schema definition
-├── hotspots.rs       # Saved hotspot profiles
-├── preferences.rs    # App preferences (theme, auto-start, etc.)
-└── security.rs       # Password rotation, blacklist/whitelist
+├── hotspots.rs       # Saved hotspot profiles (hotspots.json)
+└── preferences.rs    # App preferences (preferences.json)
 ```
 
-**GSettings schema** (`data/com.nimbus.Hotspot.gschema.xml`):
+**Preferences** (`preferences.json`, written atomically):
 
-```xml
-<schemalist>
-  <schema id="com.nimbus.Hotspot" path="/com/nimbus/Hotspot/">
-    <key name="saved-hotspots" type="aa{sv}">
-      <default>[]</default>
-      <summary>Saved hotspot configurations</summary>
-    </key>
-    <key name="auto-start" type="b">
-      <default>false</default>
-      <summary>Start hotspot on login</summary>
-    </key>
-    <key name="default-band" type="s">
-      <default>'auto'</default>
-      <summary>Default frequency band</summary>
-    </key>
-    <key name="default-security" type="s">
-      <default>'wpa2-wpa3'</default>
-      <summary>Default security mode</summary>
-    </key>
-    <key name="password-rotation" type="b">
-      <default>false</default>
-      <summary>Auto-rotate password on schedule</summary>
-    </key>
-    <key name="max-clients-default" type="u">
-      <default>10</default>
-      <summary>Default max clients per hotspot</summary>
-    </key>
-  </schema>
-</schemalist>
+```json
+{
+  "auto_start": false,
+  "default_band": "Auto",
+  "default_security": "Wpa2Wpa3Transition",
+  "default_max_clients": 0,
+  "default_country": null,
+  "dark_mode_only": false,
+  "show_notifications": true,
+  "last_config": null
+}
 ```
+
+**Saved hotspots** (`hotspots.json`): a list of
+`{ uuid, name, config, created_at, last_used, use_count }` records, managed from
+the Hotspot page (`Save as profile` / `Delete profile`).
 
 ### 4.5 Telemetry Module (`telemetry/`)
 
@@ -442,8 +425,10 @@ backend/
 ├── mod.rs
 ├── orchestrator.rs   # High-level hotspot lifecycle management
 ├── firewall.rs       # nftables rule management
-├── dns.rs            # dnsmasq configuration (fallback only)
-└── captive.rs        # Captive portal management (optional)
+├── hostapd.rs        # hostapd config generation and process handling
+├── dhcp.rs           # dnsmasq process for the shared access point
+├── planner.rs        # Side-effect-free backend selection & warnings
+└── shared_ap.rs      # Shared (hostapd + dnsmasq + NAT) backend
 ```
 
 ### 4.7 UI Layer (`ui/`)
@@ -469,14 +454,7 @@ ui/
 │   ├── status_card.rs    # Hotspot status display
 │   ├── qr_dialog.rs      # QR code popup
 │   ├── station_row.rs    # Device list row widget
-│   ├── channel_picker.rs # Channel selection widget
-│   ├── band_picker.rs    # Band selection widget
 │   └── capability_badge.rs # Adapter capability display
-└── viewmodels/
-    ├── mod.rs
-    ├── dashboard_vm.rs   # Dashboard ViewModel (GObject properties)
-    ├── hotspot_vm.rs     # Hotspot form ViewModel
-    └── devices_vm.rs     # Devices list ViewModel
 ```
 
 **UI Architecture Flow**:
@@ -519,12 +497,9 @@ ViewModel ◄──bind_property── View updates (status, IP, etc.)
 nimbus-hotspot/
 ├── Cargo.toml                    # Workspace root
 ├── Cargo.lock
-├── build.rs                      # GResource compilation
-├── meson.build                   # Meson build (Flatpak)
-├── meson_options.txt
+├── meson.build                   # Binary & data installation
 ├── README.md
-├── LICENSE                       # GPL-3.0
-├── SECURITY.md
+├── LICENSE                       # MIT
 ├── CONTRIBUTING.md
 │
 ├── nimbus-core/                  # Core types & utilities
@@ -555,14 +530,12 @@ nimbus-hotspot/
 │       ├── lib.rs
 │       ├── capabilities.rs
 │       ├── scanner.rs
-│       ├── channel.rs
 │       └── qr.rs
 │
 ├── nimbus-settings/              # Configuration management
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
-│       ├── schema.rs
 │       ├── hotspots.rs
 │       └── preferences.rs
 │
@@ -570,7 +543,6 @@ nimbus-hotspot/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs
-│       ├── collector.rs
 │       ├── history.rs
 │       ├── bandwidth.rs
 │       └── manufacturer.rs
@@ -580,9 +552,11 @@ nimbus-hotspot/
 │   └── src/
 │       ├── lib.rs
 │       ├── orchestrator.rs
+│       ├── planner.rs
 │       ├── firewall.rs
-│       ├── dns.rs
-│       └── captive.rs
+│       ├── hostapd.rs
+│       ├── dhcp.rs
+│       └── shared_ap.rs
 │
 ├── nimbus-ui/                    # GTK4/Libadwaita frontend
 │   ├── Cargo.toml
@@ -604,14 +578,7 @@ nimbus-hotspot/
 │       │   ├── status_card.rs
 │       │   ├── qr_dialog.rs
 │       │   ├── station_row.rs
-│       │   ├── channel_picker.rs
-│       │   ├── band_picker.rs
 │       │   └── capability_badge.rs
-│       └── viewmodels/
-│           ├── mod.rs
-│           ├── dashboard_vm.rs
-│           ├── hotspot_vm.rs
-│           └── devices_vm.rs
 │
 ├── nimbus-cli/                   # Optional CLI interface
 │   ├── Cargo.toml
@@ -849,10 +816,10 @@ pub enum NimbusError {
 | brcmfmac driver crashes with virtual interfaces | Medium | Detect driver, warn user, disable virtual interface mode for affected hardware |
 | Intel LAR prevents 5GHz AP on some adapters | Medium | Detect Intel + 5GHz, explain limitation, suggest 2.4GHz fallback |
 | `iw` output format varies between versions | Medium | Parse robustly, test across iw 5.x-6.x, fallback to D-Bus capabilities |
-| hostapd may be needed for advanced features | Low | Default to NM-managed AP. Only spawn hostapd for features NM cannot handle (captive portal, RADIUS) |
+| hostapd is needed to share without dropping the uplink | Medium | The shared backend requires root and hostapd/dnsmasq; the NM path needs none of it |
 | dnsmasq-base vs dnsmasq package differences | Low | NM uses dnsmasq-base internally. Only install dnsmasq if custom DHCP config needed |
 | SELinux/AppArmor may block operations | Medium | Run as system service or use polkit for privilege escalation. Ship AppArmor profile |
-| Flatpak sandboxing limits D-Bus access | High | Use `--socket=system-bus` and `--talk-name=org.freedesktop.NetworkManager` in Flatpak manifest |
+| The GUI runs unprivileged and cannot start the shared backend | Medium | Plan warns about this and falls back to the NM backend; the D-Bus service runs as root |
 | GTK4 version differences across distros | Low | Target GTK4 4.12+ (available on all target distros). Use version checks for newer APIs |
 
 ---
@@ -899,15 +866,15 @@ pub enum NimbusError {
 - [ ] First-run assistant
 - [ ] Error recovery ("Repair" button)
 - [ ] Auto-start on login
-- [ ] Settings persistence (GSettings)
-- [ ] Flatpak packaging
+- [x] Settings persistence (JSON)
+- [x] Meson install (binaries, icons, D-Bus policy)
 - [ ] AppStream metadata
 
 ### Phase 7: Enterprise & Extras (Weeks 21-24)
 - [ ] Multiple hotspot profiles
 - [ ] CLI interface
 - [ ] D-Bus API for external tools
-- [ ] Captive portal (optional)
+- [ ] Captive portal (optional, not implemented)
 - [ ] Plugin system foundation
 
 ---
@@ -968,43 +935,17 @@ mockall = "0.13"
 
 ---
 
-## 12. Flatpak Manifest
+## 12. Packaging notes
 
-```json
-{
-  "app-id": "com.nimbus.Hotspot",
-  "runtime": "org.gnome.Platform",
-  "runtime-version": "47",
-  "sdk": "org.gnome.Sdk",
-  "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
-  "command": "nimbus-hotspot",
-  "finish-args": [
-    "--socket=wayland",
-    "--socket=fallback-x11",
-    "--socket=system-bus",
-    "--socket=session-bus",
-    "--talk-name=org.freedesktop.NetworkManager",
-    "--talk-name=org.freedesktop.DBus",
-    "--talk-name=org.freedesktop.login1",
-    "--system-talk-name=org.freedesktop.NetworkManager",
-    "--filesystem=host-os",
-    "--ipc=host",
-    "--device=all"
-  ],
-  "build-options": {
-    "append-path": "/usr/lib/sdk/rust-stable/bin",
-    "env": {
-      "CARGO_HOME": "/run/build/nimbus-hotspot/cargo"
-    }
-  },
-  "modules": [
-    {
-      "name": "nimbus-hotspot",
-      "buildsystem": "meson",
-      "sources": [
-        { "type": "dir", "path": "." }
-      ]
-    }
-  ]
-}
-```
+There is deliberately no Flatpak manifest in the tree. The NetworkManager
+backend is sandbox-friendly (it only needs `org.freedesktop.NetworkManager` on
+the bus), but the shared backend executes `hostapd`, `dnsmasq`, `nft` and
+`iw reg set`, none of which can be made available to a Flatpak sandbox. A
+Flatpak build would therefore silently lose the feature the project exists for.
+
+The supported installation paths are:
+
+- `cargo build --release` plus manual installation of the binaries and data
+  files, or
+- Meson, which installs the GUI, the CLI, the D-Bus service and its policy,
+  the desktop entry, the icon and the systemd unit.
