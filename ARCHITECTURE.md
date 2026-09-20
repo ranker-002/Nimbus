@@ -705,46 +705,29 @@ pub struct Station {
 
 ## 7. Key Interfaces
 
-### 7.1 Model -> Backend Communication
+### 7.1 UI -> Backend Communication
 
-```rust
-// Model sends commands to backend via async channels
-pub enum BackendCommand {
-    StartHotspot { config: HotspotConfig, interface: String },
-    StopHotspot,
-    UpdateHotspot { config: HotspotConfig },
-    GetStations,
-    GetAdapterInfo { interface: String },
-    ScanNetworks,
-    AddToBlacklist { mac: MacAddress },
-    RemoveFromBlacklist { mac: MacAddress },
-}
+The GTK window sends `BackendCommand`s through an `async-channel` and consumes
+`UiEvent`s on the GLib main loop. See `nimbus-core/src/events.rs` for the
+current variants.
 
-// Backend sends events back to Model
-pub enum BackendEvent {
-    HotspotStarted(HotspotInfo),
-    HotspotStopped,
-    HotspotError(String),
-    StationsUpdated(Vec<Station>),
-    AdapterInfo(AdapterCapabilities),
-    NetworksScanned(Vec<NetworkInfo>),
-    BandwidthUpdate(BandwidthSample),
-}
-```
+### 7.2 Privileged operations
 
-### 7.2 Model -> Presenter Communication
+Two backends can execute the same commands:
 
-```rust
-// Events emitted by Model, consumed by Presenter on GLib main loop
-pub enum UiEvent {
-    HotspotStateChanged(HotspotState),
-    StationsChanged(Vec<Station>),
-    StatsUpdated(DashboardStats),
-    ErrorOccurred(String),
-    ShowToast { message: String, kind: ToastKind },
-    NavigateTo(Page),
-}
-```
+- **Local** (`nimbus-backend`): an `Orchestrator` on a Tokio runtime inside a
+  dedicated thread of the GUI process. Handles everything that needs no
+  privileges, and all privileged work when the service is absent.
+- **System service** (`nimbus-dbus-api`, root): the same `Orchestrator`
+  exposed over the system bus as `com.nimbus.Hotspot`. The GUI routes
+  start/stop/scan/kick/history to it when it is running, so `hostapd`,
+  `dnsmasq`, `nft` and `iw reg set` never run in the user's process and no
+  root-owned configuration files appear in the user's home.
+
+PolicyKit gates each privileged call (`com.nimbus.hotspot.manage`,
+`allow_active=yes`); inactive sessions need an administrator. The service
+publishes `StateChanged`, `StationsChanged` and `StatsChanged` signals, which
+the GUI forwards to its normal `UiEvent` stream.
 
 ### 7.3 Firewall Interface
 

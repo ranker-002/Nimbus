@@ -97,12 +97,20 @@ Nimbus picks one of two backends per start:
 
 The shared backend keeps your Wi-Fi connection up by creating a second
 interface on the same radio and routing it through the existing connection.
-Because it starts `hostapd`, `dnsmasq`, `nft` and `iw reg set`, it needs root:
-start it with `sudo`, or run the D-Bus service (which is installed as root by
-its systemd unit). The GUI falls back to the NetworkManager backend when it is
-not root and warns you before doing anything that drops your connection; when
-sharing is blocked by privileges it also offers **Restart as Administrator**
-(through polkit) so you do not have to leave the app.
+Because it starts `hostapd`, `dnsmasq`, `nft` and `iw reg set`, it needs root.
+
+Nimbus never asks for a root password at startup. Instead:
+
+1. If the privileged **D-Bus service** is running (installed by Meson and
+   enabled with `systemctl enable --now com.nimbus.Hotspot.service`), the GUI
+   stays unprivileged and sends start/stop/scan/kick/history to it over the
+   system bus. PolicyKit authorises the caller through the
+   `com.nimbus.hotspot.manage` action: users on an active local session are
+   allowed, inactive or remote sessions need an administrator.
+2. If the service is not running, Nimbus uses its in-process backend. The
+   NetworkManager backend still works as a normal user; the shared backend
+   cannot, so the dialog offers **Restart as Administrator** (through polkit)
+   as a fallback. Configuration stays in your own home either way.
 
 ---
 
@@ -252,7 +260,9 @@ Session history lives in the local SQLite database
 | Hotspot starts but clients have no internet | Check that the adapter is not the only uplink, that `dnsmasq` is installed, and that the channel is outside DFS (52–64, 100–144) when no country is set. |
 | 5 GHz refuses to start | The world regulatory domain (`00`) forbids transmitting there. Install `wireless-regdb`, set a country code, or use 2.4 GHz. |
 | Hotspot started outside Nimbus is not shown | Nimbus only adopts access points it created (NetworkManager profiles named `Nimbus-*`). Stop the foreign AP first. |
-| GUI shows an empty device list | `iw dev <iface> station dump` may need privileges. Run Nimbus as root or through the D-Bus service. |
+| GUI shows an empty device list | `iw dev <iface> station dump` may need privileges. Run Nimbus through the D-Bus service. |
+| `Not authorized to manage Wi-Fi hotspots` | PolicyKit denied the call. Check that `/usr/share/polkit-1/actions/com.nimbus.Hotspot.policy` is installed, then restart the service: `sudo systemctl restart com.nimbus.Hotspot.service`. |
+| The service is not found | The GUI simply uses its local backend. Enable it with `sudo systemctl enable --now com.nimbus.Hotspot.service`; restart Nimbus so it connects at start-up. |
 
 ---
 
