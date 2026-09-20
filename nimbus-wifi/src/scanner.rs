@@ -66,26 +66,7 @@ fn parse_iw_scan_dump(output: &str) -> Result<Vec<ScannedNetwork>> {
     Ok(networks)
 }
 
-pub fn freq_to_channel(freq: u32) -> u32 {
-    match freq {
-        2412 => 1,
-        2417 => 2,
-        2422 => 3,
-        2427 => 4,
-        2432 => 5,
-        2437 => 6,
-        2442 => 7,
-        2447 => 8,
-        2452 => 9,
-        2457 => 10,
-        2462 => 11,
-        2467 => 12,
-        2472 => 13,
-        f if (5170..=5825).contains(&f) => (f - 5000) / 5,
-        f if (5955..=7115).contains(&f) => (f - 5950) / 5,
-        _ => 0,
-    }
-}
+pub use nimbus_core::types::freq_to_channel;
 
 #[cfg(test)]
 mod tests {

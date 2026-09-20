@@ -1,11 +1,23 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use adw::prelude::*;
+use mac_address::MacAddress;
 
 use nimbus_core::types::StationInfo;
+
+use crate::components::station_row::create_station_row_widget;
+
+type Kick = Box<dyn Fn(MacAddress)>;
 
 pub struct DevicesPage {
     main_box: gtk::Box,
     list: gtk::ListBox,
     count_label: gtk::Label,
+    empty_label: gtk::Label,
+    /// Shared so buttons created before the callback was registered still find
+    /// it when clicked.
+    kick: Rc<RefCell<Option<Kick>>>,
 }
 
 impl Default for DevicesPage {
@@ -34,14 +46,19 @@ impl DevicesPage {
 
         main_box.append(&header_box);
 
+        let empty_label = gtk::Label::builder()
+            .label("No devices are connected yet.")
+            .css_classes(["dim-label"])
+            .margin_top(24)
+            .build();
+        main_box.append(&empty_label);
+
         let scrolled = gtk::ScrolledWindow::builder()
             .vexpand(true)
             .hexpand(true)
             .build();
 
-        let list = gtk::ListBox::builder()
-            .css_classes(["boxed-list"])
-            .build();
+        let list = gtk::ListBox::builder().css_classes(["boxed-list"]).build();
         scrolled.set_child(Some(&list));
 
         main_box.append(&scrolled);
@@ -50,6 +67,8 @@ impl DevicesPage {
             main_box,
             list,
             count_label,
+            empty_label,
+            kick: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -57,72 +76,39 @@ impl DevicesPage {
         self.main_box.upcast_ref()
     }
 
+    /// Called when the user asks to disconnect a device.
+    pub fn connect_kick<F: Fn(MacAddress) + 'static>(&self, f: F) {
+        *self.kick.borrow_mut() = Some(Box::new(f));
+    }
+
     pub fn update_stations(&self, stations: &[StationInfo]) {
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
         }
 
-        self.count_label
-            .set_text(&format!("({})", stations.len()));
+        self.count_label.set_text(&format!("({})", stations.len()));
+        self.empty_label.set_visible(stations.is_empty());
 
         for station in stations {
-            let row = create_station_row(station);
+            let row = create_station_row_widget(station);
+
+            let kick_button = gtk::Button::builder()
+                .icon_name("window-close-symbolic")
+                .tooltip_text("Disconnect this device")
+                .css_classes(["flat"])
+                .valign(gtk::Align::Center)
+                .build();
+
+            let mac = station.mac;
+            let kick = Rc::clone(&self.kick);
+            kick_button.connect_clicked(move |_| {
+                if let Some(callback) = kick.borrow().as_ref() {
+                    callback(mac);
+                }
+            });
+
+            row.add_suffix(&kick_button);
             self.list.append(&row);
         }
-    }
-}
-
-fn create_station_row(station: &StationInfo) -> adw::ActionRow {
-    let mac_str = format!("{}", station.mac);
-    let short_mac = if mac_str.len() > 8 {
-        &mac_str[mac_str.len() - 8..]
-    } else {
-        &mac_str
-    };
-
-    let title = station
-        .manufacturer
-        .clone()
-        .unwrap_or_else(|| format!("Device {}", short_mac));
-
-    let subtitle = format!(
-        "Signal: {} dBm ({}) · ↑ {} · ↓ {}",
-        station.signal_dbm,
-        station.signal_percent,
-        format_bytes(station.tx_bytes),
-        format_bytes(station.rx_bytes),
-    );
-
-    let row = adw::ActionRow::builder()
-        .title(&title)
-        .subtitle(&subtitle)
-        .activatable(false)
-        .build();
-
-    let signal_icon = match station.signal_percent {
-        0..=25 => "network-wireless-signal-weak-symbolic",
-        26..=50 => "network-wireless-signal-ok-symbolic",
-        51..=75 => "network-wireless-signal-good-symbolic",
-        _ => "network-wireless-signal-excellent-symbolic",
-    };
-
-    row.add_suffix(&gtk::Image::from_icon_name(signal_icon));
-
-    row
-}
-
-fn format_bytes(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-    const GB: u64 = 1024 * MB;
-
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
     }
 }

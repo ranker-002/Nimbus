@@ -9,6 +9,15 @@ description.workspace = true
 nimbus-core = { path = "../nimbus-core" }
 nimbus-network = { path = "../nimbus-network" }
 nimbus-wifi = { path = "../nimbus-wifi" }
+nimbus-telemetry = { path = "../nimbus-telemetry" }
 tokio.workspace = true
+async-channel.workspace = true
 async-trait.workspace = true
 log.workspace = true
+mac_address.workspace = true
+libc = "0.2"
+
+[dev-dependencies]
+mockall.workspace = true
+mac_address.workspace = true
+chrono.workspace = true

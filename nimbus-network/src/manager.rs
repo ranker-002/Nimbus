@@ -6,8 +6,8 @@ use tokio::process::Command;
 
 use nimbus_core::error::{NimbusError, Result};
 use nimbus_core::types::{
-    AdapterCapabilities, Band, BandwidthSample, HotspotConfig, HotspotInfo, InterfaceState,
-    InterfaceType, NetworkInterface, StationInfo,
+    channel_to_freq, freq_to_channel, AdapterCapabilities, Band, HotspotConfig, HotspotInfo,
+    InterfaceState, InterfaceType, NetworkInterface, Security, StationConnection, StationInfo,
 };
 
 use crate::capabilities::parse_iw_phy_info;
@@ -33,12 +33,70 @@ pub fn parse_mac(s: &str) -> MacAddress {
     }
 }
 
+/// Prefix stamped on the `connection.id` of every NetworkManager profile
+/// Nimbus creates.
+///
+/// These profiles are runtime artefacts owned entirely by Nimbus — saved
+/// hotspot configurations live in `~/.config/nimbus-hotspot/`, not in
+/// NetworkManager — so anything carrying this prefix can be removed once it is
+/// no longer active.
+pub const PROFILE_PREFIX: &str = "Nimbus-";
+
+/// Whether a NetworkManager profile id belongs to Nimbus.
+pub fn is_nimbus_profile(id: &str) -> bool {
+    id.starts_with(PROFILE_PREFIX)
+}
+
+/// The id and uuid of every active connection Nimbus created.
+///
+/// NetworkManager appends a counter when an id is already taken
+/// (`Nimbus-Foo 1`), so matching is done on the prefix rather than the exact
+/// name.
+fn active_nimbus_profiles(active: &[nmrs::ActiveConnection]) -> Vec<(String, String)> {
+    active
+        .iter()
+        .filter_map(|ac| match ac {
+            nmrs::ActiveConnection::Wifi(c) => Some((&c.id, &c.uuid)),
+            nmrs::ActiveConnection::Wired(c) => Some((&c.id, &c.uuid)),
+            _ => None,
+        })
+        .filter(|(id, _)| is_nimbus_profile(id))
+        .map(|(id, uuid)| (id.clone(), uuid.clone()))
+        .collect()
+}
+
+/// The `802-11-wireless-security.key-mgmt` value NetworkManager expects, or
+/// `None` when the connection must carry no security setting at all.
+///
+/// Two traps live here:
+///
+/// - NetworkManager takes exactly **one** value — a space-separated list like
+///   `"wpa-psk sae"` is rejected with `InvalidProperty`. A genuine WPA2/WPA3
+///   transition AP needs hostapd's `wpa_key_mgmt=WPA-PSK SAE`, which
+///   NetworkManager cannot express, so the transition setting degrades to WPA2.
+/// - An open network is *not* `key-mgmt="none"`. That value means static WEP,
+///   and wpa_supplicant rejects it with "does not support WEP encryption". An
+///   open network is expressed by omitting `802-11-wireless-security` entirely.
+///
+/// [`nimbus_backend::planner`] rewrites the config for the first case, so what
+/// the user is shown matches what is created.
+pub fn key_mgmt_for(security: &Security) -> Option<&'static str> {
+    match security {
+        Security::Open => None,
+        Security::Wpa3 => Some("sae"),
+        // WPA2, and the transition setting that has to degrade to it.
+        Security::Wpa2 | Security::Wpa2Wpa3Transition => Some("wpa-psk"),
+    }
+}
+
 pub fn validate_mac(s: &str) -> bool {
     let parts: Vec<&str> = s.split(':').collect();
     if parts.len() != 6 {
         return false;
     }
-    parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
+    parts
+        .iter()
+        .all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 pub struct NmManager {
@@ -129,7 +187,29 @@ impl NetworkManagerApi for NmManager {
             NimbusError::InterfaceNotFound(format!("Device '{}' not found: {}", interface, e))
         })?;
 
-        let iw_caps = parse_iw_phy_info(interface).await.unwrap_or_default();
+        let (iw_caps, detected) = match parse_iw_phy_info(interface).await {
+            Ok(caps) => (caps, true),
+            Err(e) => {
+                // `iw` is not installed or refused to answer. Guessing is
+                // better than blocking: NetworkManager can still create the
+                // AP, and the planner knows not to reject the request based on
+                // capabilities it does not actually have.
+                log::warn!(
+                    "Could not read the capabilities of {} ({}); starting from \
+                     conservative defaults",
+                    interface,
+                    e
+                );
+                (
+                    crate::capabilities::IwPhyInfo {
+                        supports_ap: true,
+                        supports_wpa3: true,
+                        ..Default::default()
+                    },
+                    false,
+                )
+            }
+        };
         let phy_name = self.get_phy_name(interface).await.unwrap_or_default();
         let driver = self.get_driver(interface).await.unwrap_or_default();
 
@@ -150,7 +230,9 @@ impl NetworkManagerApi for NmManager {
             supports_wifi_6: iw_caps.supports_wifi_6,
             supports_wifi_6e: iw_caps.supports_wifi_6e,
             supports_wifi_7: iw_caps.supports_wifi_7,
+            detected,
             supports_simultaneous_sta_ap: iw_caps.can_do_sta_and_ap,
+            sta_ap_same_channel_only: iw_caps.sta_ap_same_channel_only,
             supported_bands,
             supported_channels_2ghz: iw_caps.channels_2ghz,
             supported_channels_5ghz: iw_caps.channels_5ghz,
@@ -158,25 +240,28 @@ impl NetworkManagerApi for NmManager {
         })
     }
 
-    async fn create_hotspot(
-        &self,
-        config: &HotspotConfig,
-        interface: &str,
-    ) -> Result<HotspotInfo> {
+    async fn create_hotspot(&self, config: &HotspotConfig, interface: &str) -> Result<HotspotInfo> {
         config.validate()?;
         let nm = self.require_client()?;
 
         let mut settings: HashMap<&str, HashMap<&str, zbus::zvariant::Value<'_>>> = HashMap::new();
 
+        // Clear out profiles left behind by an earlier run before adding
+        // another, so repeated starts do not pile up "Nimbus-Foo 1",
+        // "Nimbus-Foo 2", ... in NetworkManager.
+        self.purge_stale_profiles().await;
+
         let mut conn = HashMap::new();
-        conn.insert(
-            "type",
-            zbus::zvariant::Value::Str("802-11-wireless".into()),
-        );
+        conn.insert("type", zbus::zvariant::Value::Str("802-11-wireless".into()));
         conn.insert(
             "id",
-            zbus::zvariant::Value::Str(format!("Nimbus-{}", config.ssid).into()),
+            zbus::zvariant::Value::Str(format!("{}{}", PROFILE_PREFIX, config.ssid).into()),
         );
+        // Never let NetworkManager bring the hotspot up on its own. On a
+        // single-radio machine an autoconnecting AP profile would seize the
+        // adapter after a reboot or a rfkill toggle and drop the user's Wi-Fi
+        // with no interaction at all.
+        conn.insert("autoconnect", zbus::zvariant::Value::Bool(false));
         settings.insert("connection", conn);
 
         let mut wifi = HashMap::new();
@@ -187,7 +272,14 @@ impl NetworkManagerApi for NmManager {
         );
         wifi.insert("mode", zbus::zvariant::Value::Str("ap".into()));
 
-        match config.band {
+        // NetworkManager rejects a channel without a band, so when a specific
+        // channel is pinned and the band is left on Auto, derive it.
+        let effective_band = match (&config.band, config.channel) {
+            (Band::Auto, Some(ch)) => Band::of_channel(ch),
+            (band, _) => band.clone(),
+        };
+
+        match effective_band {
             Band::Band2_4Ghz => {
                 wifi.insert("band", zbus::zvariant::Value::Str("bg".into()));
             }
@@ -209,43 +301,16 @@ impl NetworkManagerApi for NmManager {
 
         settings.insert("802-11-wireless", wifi);
 
-        let mut wsec = HashMap::new();
-        match config.security {
-            nimbus_core::types::Security::Open => {
-                wsec.insert(
-                    "key-mgmt",
-                    zbus::zvariant::Value::Str("none".into()),
-                );
-            }
-            nimbus_core::types::Security::Wpa2 => {
-                wsec.insert(
-                    "key-mgmt",
-                    zbus::zvariant::Value::Str("wpa-psk".into()),
-                );
-                wsec.insert(
-                    "psk",
-                    zbus::zvariant::Value::Str(config.password.as_str().into()),
-                );
-            }
-            nimbus_core::types::Security::Wpa3 => {
-                wsec.insert("key-mgmt", zbus::zvariant::Value::Str("sae".into()));
-                wsec.insert(
-                    "psk",
-                    zbus::zvariant::Value::Str(config.password.as_str().into()),
-                );
-            }
-            nimbus_core::types::Security::Wpa2Wpa3Transition => {
-                wsec.insert(
-                    "key-mgmt",
-                    zbus::zvariant::Value::Str("wpa-psk sae".into()),
-                );
-                wsec.insert(
-                    "psk",
-                    zbus::zvariant::Value::Str(config.password.as_str().into()),
-                );
-            }
+        // Omitted entirely for an open network — see `key_mgmt_for`.
+        if let Some(key_mgmt) = key_mgmt_for(&config.security) {
+            let mut wsec = HashMap::new();
+            wsec.insert("key-mgmt", zbus::zvariant::Value::Str(key_mgmt.into()));
+            wsec.insert(
+                "psk",
+                zbus::zvariant::Value::Str(config.password.as_str().into()),
+            );
+            settings.insert("802-11-wireless-security", wsec);
         }
-        settings.insert("802-11-wireless-security", wsec);
 
         let mut ip4 = HashMap::new();
         ip4.insert("method", zbus::zvariant::Value::Str("shared".into()));
@@ -278,20 +343,27 @@ impl NetworkManagerApi for NmManager {
             }
         }
 
-        // Determine frequency and channel from config
-        let (frequency, channel) = match (&config.band, config.channel) {
-            (Band::Band5Ghz, Some(ch)) => (5000 + ch * 5, ch),
-            (Band::Band5Ghz, None) => (5180, 36),
-            (Band::Band2_4Ghz, Some(ch)) => (2407 + ch * 5, ch),
-            (Band::Band2_4Ghz, None) => (2437, 6),
-            (Band::Auto, Some(ch)) => {
-                if ch >= 36 {
-                    (5000 + ch * 5, ch)
-                } else {
-                    (2407 + ch * 5, ch)
-                }
-            }
-            (Band::Auto, None) => (2437, 6),
+        // Report what the device actually settled on; fall back to the
+        // configured channel when NM has not published a frequency yet.
+        let live_frequency = nm
+            .list_wifi_devices()
+            .await
+            .ok()
+            .and_then(|devices| {
+                devices
+                    .iter()
+                    .find(|d| d.interface == interface)
+                    .and_then(|d| d.active_frequency_mhz)
+            })
+            .filter(|f| *f > 0);
+
+        let (frequency, channel) = match live_frequency {
+            Some(freq) => (freq, freq_to_channel(freq)),
+            None => match (&config.band, config.channel) {
+                (_, Some(ch)) => (channel_to_freq(ch), ch),
+                (Band::Band5Ghz, None) => (5180, 36),
+                (Band::Band2_4Ghz | Band::Auto, None) => (2437, 6),
+            },
         };
 
         Ok(HotspotInfo {
@@ -306,38 +378,46 @@ impl NetworkManagerApi for NmManager {
 
     async fn stop_hotspot(&self) -> Result<()> {
         let nm = self.require_client()?;
-        let active = nm.list_active_connections().await.map_err(|_e| {
-            NimbusError::HotspotNotActive
-        })?;
+        let active = nm
+            .list_active_connections()
+            .await
+            .map_err(|_e| NimbusError::HotspotNotActive)?;
 
-        for ac in &active {
-            match ac {
-                nmrs::ActiveConnection::Wifi(wifi) => {
-                    if wifi.id.starts_with("Nimbus-") {
-                        self.deactivate_connection_by_uuid(&wifi.uuid).await?;
-                        return Ok(());
-                    }
-                }
-                nmrs::ActiveConnection::Wired(wired)
-                    if wired.id.starts_with("Nimbus-") => {
-                    self.deactivate_connection_by_uuid(&wired.uuid).await?;
-                    return Ok(());
-                }
-                _ => {}
+        let running = active_nimbus_profiles(&active);
+        if running.is_empty() {
+            // Still sweep up: a profile can survive a crash between start and
+            // stop without ever being active again.
+            self.purge_stale_profiles().await;
+            return Err(NimbusError::HotspotNotActive);
+        }
+
+        for (id, uuid) in &running {
+            // Bring it down first so clients are dropped cleanly. Deleting the
+            // profile also tears the connection down, so a failure here is not
+            // fatal — the delete below is what actually guarantees it.
+            if let Err(e) = self.deactivate_connection_by_uuid(uuid).await {
+                log::warn!("Could not deactivate '{}': {}", id, e);
+            }
+            if let Err(e) = nm.delete_saved_connection(uuid).await {
+                log::warn!("Could not remove the profile for '{}': {}", id, e);
             }
         }
-        Err(NimbusError::HotspotNotActive)
+
+        // Catch anything that was already inactive.
+        self.purge_stale_profiles().await;
+        Ok(())
     }
 
     async fn get_active_hotspot(&self) -> Result<Option<HotspotInfo>> {
         let nm = self.require_client()?;
-        let active = nm.list_active_connections().await.map_err(|e| {
-            NimbusError::NetworkManagerUnavailable(format!("{}", e))
-        })?;
+        let active = nm
+            .list_active_connections()
+            .await
+            .map_err(|e| NimbusError::NetworkManagerUnavailable(format!("{}", e)))?;
 
         for ac in &active {
             if let nmrs::ActiveConnection::Wifi(wifi) = ac {
-                if wifi.id.starts_with("Nimbus-")
+                if is_nimbus_profile(&wifi.id)
                     && wifi.state == nmrs::ActiveConnectionState::Activated
                 {
                     let iface = wifi.interface.clone().unwrap_or_default();
@@ -374,44 +454,49 @@ impl NetworkManagerApi for NmManager {
         station::get_stations(interface).await
     }
 
-    async fn get_upstream_interface(&self) -> Result<Option<String>> {
-        let interfaces = interface::detect_interfaces().await?;
-        for iface in &interfaces {
-            if iface.interface_type == InterfaceType::Ethernet
-                && iface.state == InterfaceState::Up
-            {
-                return Ok(Some(iface.name.clone()));
-            }
-        }
-        for iface in &interfaces {
-            if iface.interface_type == InterfaceType::Wifi && iface.state == InterfaceState::Up {
-                return Ok(Some(iface.name.clone()));
-            }
-        }
-        Ok(None)
+    async fn disconnect_station(&self, interface: &str, mac: &MacAddress) -> Result<()> {
+        station::disconnect_station(interface, mac).await
     }
 
-    async fn get_bandwidth_sample(&self, interface: &str) -> Result<BandwidthSample> {
-        let rx_path = format!("/sys/class/net/{}/statistics/rx_bytes", interface);
-        let tx_path = format!("/sys/class/net/{}/statistics/tx_bytes", interface);
+    async fn get_upstream_interface(&self) -> Result<Option<String>> {
+        interface::get_upstream_interface().await
+    }
 
-        let rx = tokio::fs::read_to_string(&rx_path)
-            .await?
-            .trim()
-            .parse::<u64>()
-            .unwrap_or(0);
-        let tx = tokio::fs::read_to_string(&tx_path)
-            .await?
-            .trim()
-            .parse::<u64>()
-            .unwrap_or(0);
+    async fn get_station_connection(&self, interface: &str) -> Result<Option<StationConnection>> {
+        let nm = self.require_client()?;
 
-        Ok(BandwidthSample {
-            rx_rate: 0,
-            tx_rate: 0,
-            total_rx: rx,
-            total_tx: tx,
-        })
+        // A device hosting one of our hotspots is acting as an AP, not as a
+        // station. This has to be decided from the profile id: in AP mode
+        // NetworkManager reports the hotspot's own SSID as the device's active
+        // SSID, which is whatever the user typed and carries no marker.
+        if let Ok(active) = nm.list_active_connections().await {
+            let hosts_our_ap = active.iter().any(|ac| {
+                matches!(ac, nmrs::ActiveConnection::Wifi(c)
+                    if is_nimbus_profile(&c.id) && c.interface.as_deref() == Some(interface))
+            });
+            if hosts_our_ap {
+                return Ok(None);
+            }
+        }
+
+        let devices = nm.list_wifi_devices().await.map_err(|e| {
+            NimbusError::NetworkManagerUnavailable(format!("Failed to list devices: {}", e))
+        })?;
+
+        let Some(dev) = devices.iter().find(|d| d.interface == interface) else {
+            return Ok(None);
+        };
+
+        // Only an activated device is actually joined to a network.
+        if dev.state != nmrs::DeviceState::Activated {
+            return Ok(None);
+        }
+
+        Ok(dev.active_frequency_mhz.map(|frequency| StationConnection {
+            interface: interface.to_string(),
+            ssid: dev.active_ssid.clone(),
+            frequency,
+        }))
     }
 
     async fn is_nm_available(&self) -> bool {
@@ -419,28 +504,53 @@ impl NetworkManagerApi for NmManager {
     }
 }
 
-fn freq_to_channel(freq: u32) -> u32 {
-    match freq {
-        2412 => 1,
-        2417 => 2,
-        2422 => 3,
-        2427 => 4,
-        2432 => 5,
-        2437 => 6,
-        2442 => 7,
-        2447 => 8,
-        2452 => 9,
-        2457 => 10,
-        2462 => 11,
-        2467 => 12,
-        2472 => 13,
-        f if (5170..=5825).contains(&f) => (f - 5000) / 5,
-        f if (5955..=7115).contains(&f) => (f - 5950) / 5,
-        _ => 0,
-    }
-}
-
 impl NmManager {
+    /// Deletes Nimbus profiles that are not currently in use.
+    ///
+    /// Active ones are left alone, so this can run while a hotspot from another
+    /// Nimbus instance is up. Returns how many were removed; failures are
+    /// logged rather than raised, since cleanup must never stop a hotspot from
+    /// starting or stopping.
+    async fn purge_stale_profiles(&self) -> usize {
+        let Ok(nm) = self.require_client() else {
+            return 0;
+        };
+
+        let in_use: Vec<String> = match nm.list_active_connections().await {
+            Ok(active) => active_nimbus_profiles(&active)
+                .into_iter()
+                .map(|(_, uuid)| uuid)
+                .collect(),
+            Err(e) => {
+                log::warn!("Could not list active connections: {}", e);
+                return 0;
+            }
+        };
+
+        let saved = match nm.list_saved_connections_brief().await {
+            Ok(saved) => saved,
+            Err(e) => {
+                log::warn!("Could not list saved connections: {}", e);
+                return 0;
+            }
+        };
+
+        let mut removed = 0;
+        for profile in saved
+            .iter()
+            .filter(|p| is_nimbus_profile(&p.id) && !in_use.contains(&p.uuid))
+        {
+            match nm.delete_saved_connection(&profile.uuid).await {
+                Ok(()) => {
+                    log::debug!("Removed leftover profile '{}'", profile.id);
+                    removed += 1;
+                }
+                Err(e) => log::warn!("Could not remove profile '{}': {}", profile.id, e),
+            }
+        }
+        removed
+    }
+
     async fn deactivate_connection_by_uuid(&self, uuid: &str) -> Result<()> {
         let output = Command::new("nmcli")
             .args(["connection", "down", "uuid", uuid])
@@ -492,6 +602,110 @@ impl NmManager {
                 Ok(driver)
             }
             Err(_) => Ok("unknown".to_string()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognises_profiles_nimbus_created() {
+        assert!(is_nimbus_profile("Nimbus-MonHotspot"));
+        // NetworkManager appends a counter when the id is already taken.
+        assert!(is_nimbus_profile("Nimbus-MonHotspot 1"));
+        // An empty SSID still carries the prefix.
+        assert!(is_nimbus_profile("Nimbus-"));
+    }
+
+    #[test]
+    fn leaves_profiles_it_does_not_own_alone() {
+        // The user's own networks must never be swept up by the cleanup, even
+        // when the name looks similar.
+        assert!(!is_nimbus_profile("CANALBOX-E7E2-2G-5G"));
+        assert!(!is_nimbus_profile("Nimbus"));
+        assert!(!is_nimbus_profile("My Nimbus-Hotspot"));
+        assert!(!is_nimbus_profile("nimbus-lowercase"));
+        assert!(!is_nimbus_profile(""));
+    }
+
+    #[test]
+    fn parses_a_well_formed_mac() {
+        assert_eq!(
+            parse_mac("14:13:33:37:4b:89"),
+            MacAddress::new([0x14, 0x13, 0x33, 0x37, 0x4b, 0x89])
+        );
+    }
+
+    #[test]
+    fn falls_back_to_a_zero_mac_when_unparseable() {
+        assert_eq!(parse_mac("not-a-mac"), MacAddress::new([0; 6]));
+        assert_eq!(parse_mac(""), MacAddress::new([0; 6]));
+    }
+
+    #[test]
+    fn validates_mac_formatting() {
+        assert!(validate_mac("14:13:33:37:4B:89"));
+        assert!(!validate_mac("14:13:33:37:4B"));
+        assert!(!validate_mac("14-13-33-37-4B-89"));
+        assert!(!validate_mac("14:13:33:37:4B:8G"));
+    }
+}
+
+#[cfg(test)]
+mod key_mgmt_tests {
+    use super::*;
+
+    /// Every value must be one NetworkManager accepts. A space-separated list
+    /// is rejected with `InvalidProperty`, which is what used to make every
+    /// hotspot start fail out of the box.
+    #[test]
+    fn key_mgmt_is_always_a_single_value() {
+        for security in [
+            Security::Open,
+            Security::Wpa2,
+            Security::Wpa3,
+            Security::Wpa2Wpa3Transition,
+        ] {
+            let Some(value) = key_mgmt_for(&security) else {
+                continue;
+            };
+            assert!(
+                !value.contains(' '),
+                "{:?} produced the multi-value key-mgmt {:?}",
+                security,
+                value
+            );
+            assert!(["wpa-psk", "sae"].contains(&value));
+        }
+    }
+
+    /// `key-mgmt="none"` is static WEP in NetworkManager's vocabulary, and
+    /// wpa_supplicant refuses it outright. An open network must carry no
+    /// security setting at all.
+    #[test]
+    fn an_open_network_has_no_key_mgmt() {
+        assert_eq!(key_mgmt_for(&Security::Open), None);
+    }
+
+    #[test]
+    fn key_mgmt_maps_each_secured_mode() {
+        assert_eq!(key_mgmt_for(&Security::Wpa2), Some("wpa-psk"));
+        assert_eq!(key_mgmt_for(&Security::Wpa3), Some("sae"));
+        // No mixed AP support in NetworkManager: falls back to WPA2.
+        assert_eq!(key_mgmt_for(&Security::Wpa2Wpa3Transition), Some("wpa-psk"));
+    }
+
+    #[test]
+    fn no_security_mode_ever_asks_for_wep() {
+        for security in [
+            Security::Open,
+            Security::Wpa2,
+            Security::Wpa3,
+            Security::Wpa2Wpa3Transition,
+        ] {
+            assert_ne!(key_mgmt_for(&security), Some("none"));
         }
     }
 }

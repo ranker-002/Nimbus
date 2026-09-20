@@ -67,8 +67,7 @@ impl StatusCard {
                 self.status_icon
                     .set_icon_name(Some("network-wireless-signal-excellent-symbolic"));
                 self.status_label.set_text("Active");
-                self.details_label
-                    .set_text(&format!("Hotspot: {}", ssid));
+                self.details_label.set_text(&format!("Hotspot: {}", ssid));
             }
             HotspotState::Stopping => {
                 self.status_icon

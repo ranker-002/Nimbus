@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use chrono::Utc;
 use mac_address::MacAddress;
 use tokio::process::Command;
-use chrono::Utc;
 
 use nimbus_core::error::{NimbusError, Result};
 use nimbus_core::types::StationInfo;
@@ -24,6 +24,29 @@ pub async fn get_stations(interface: &str) -> Result<Vec<StationInfo>> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     parse_iw_station_dump(&stdout)
+}
+
+/// Disassociates a station from the AP running on `interface`.
+///
+/// Sends a deauthentication (subtype 0xC) rather than a plain disassociation,
+/// so the client treats the link as gone and does not silently keep using it.
+/// Requires `CAP_NET_ADMIN`.
+pub async fn disconnect_station(interface: &str, mac: &MacAddress) -> Result<()> {
+    let mac = mac.to_string();
+    let output = Command::new("iw")
+        .args(["dev", interface, "station", "del", &mac, "subtype", "0xC"])
+        .output()
+        .await
+        .map_err(|e| NimbusError::IwError(format!("Failed to run iw: {}", e)))?;
+
+    if !output.status.success() {
+        return Err(NimbusError::IwError(format!(
+            "Could not disconnect {}: {}",
+            mac,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(())
 }
 
 fn parse_iw_station_dump(output: &str) -> Result<Vec<StationInfo>> {
@@ -113,7 +136,10 @@ pub trait MacAddressExt {
 
 impl MacAddressExt for MacAddress {
     fn from_str(s: &str) -> Option<MacAddress> {
-        let cleaned: String = s.chars().filter(|c| c.is_ascii_hexdigit() || *c == ':').collect();
+        let cleaned: String = s
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit() || *c == ':')
+            .collect();
         let bytes: Vec<u8> = cleaned
             .split(':')
             .filter_map(|h| u8::from_str_radix(h, 16).ok())

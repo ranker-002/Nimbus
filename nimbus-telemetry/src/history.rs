@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 
 use nimbus_core::error::Result;
 use nimbus_core::types::ConnectionRecord;
@@ -40,13 +40,7 @@ impl HistoryDb {
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn end_record(
-        &self,
-        id: i64,
-        stations: u32,
-        rx_bytes: u64,
-        tx_bytes: u64,
-    ) -> Result<()> {
+    pub fn end_record(&self, id: i64, stations: u32, rx_bytes: u64, tx_bytes: u64) -> Result<()> {
         self.conn.execute(
             "UPDATE connections SET ended_at = ?1, stations_connected = ?2, total_rx_bytes = ?3, total_tx_bytes = ?4 WHERE id = ?5",
             params![Utc::now().to_rfc3339(), stations, rx_bytes, tx_bytes, id],

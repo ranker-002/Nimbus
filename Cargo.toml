@@ -15,9 +15,9 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "GPL-3.0-or-later"
+license = "MIT"
 authors = ["Nimbus Contributors"]
-repository = "https://github.com/nimbus-hotspot/nimbus"
+repository = "https://github.com/ranker-002/Nimbus"
 description = "Modern Wi-Fi hotspot manager for Linux"
 
 [workspace.dependencies]
@@ -58,6 +58,12 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # MAC lookup
 mac_address = { version = "1.1", features = ["serde"] }
+
+# CLI password prompt
+rpassword = "7"
+
+# Unix process handling (pid files, signals)
+libc = "0.2"
 
 # Testing
 mockall = "0.13"

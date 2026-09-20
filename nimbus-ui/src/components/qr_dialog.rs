@@ -62,6 +62,8 @@ pub fn show_qr_dialog(parent: &impl IsA<gtk::Widget>, config: &HotspotConfig) {
 
     dialog.set_child(Some(&content));
     let dialog_clone = dialog.clone();
-    close_button.connect_clicked(move |_| { dialog_clone.close(); });
+    close_button.connect_clicked(move |_| {
+        dialog_clone.close();
+    });
     dialog.present(Some(parent));
 }

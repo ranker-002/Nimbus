@@ -9,4 +9,3 @@ description.workspace = true
 nimbus-core = { path = "../nimbus-core" }
 tokio.workspace = true
 qrcode.workspace = true
-log.workspace = true

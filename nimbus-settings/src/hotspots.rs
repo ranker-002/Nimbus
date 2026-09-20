@@ -19,8 +19,8 @@ pub struct SavedHotspot {
 }
 
 fn config_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .map_err(|_| NimbusError::ConfigError("HOME not set".into()))?;
+    let home =
+        std::env::var("HOME").map_err(|_| NimbusError::ConfigError("HOME not set".into()))?;
     let dir = PathBuf::from(home).join(CONFIG_DIR);
     std::fs::create_dir_all(&dir)?;
     Ok(dir.join(HOTSPOTS_FILE))
@@ -59,6 +59,23 @@ pub fn add_hotspot(config: &HotspotConfig) -> Result<SavedHotspot> {
     hotspots.push(saved.clone());
     save_hotspots(&hotspots)?;
     Ok(saved)
+}
+
+/// Saves `config` as a profile, replacing any existing profile with the same
+/// SSID so saving the same network twice updates it instead of piling up
+/// duplicates.
+pub fn save_hotspot(config: &HotspotConfig) -> Result<SavedHotspot> {
+    let mut hotspots = load_hotspots()?;
+    if let Some(existing) = hotspots.iter_mut().find(|h| h.config.ssid == config.ssid) {
+        existing.config = config.clone();
+        existing.name = config.ssid.clone();
+        existing.last_used = Some(chrono::Utc::now().to_rfc3339());
+        existing.use_count += 1;
+        let saved = existing.clone();
+        save_hotspots(&hotspots)?;
+        return Ok(saved);
+    }
+    add_hotspot(config)
 }
 
 pub fn delete_hotspot(uuid: &str) -> Result<()> {

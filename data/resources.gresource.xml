@@ -1,5 +1,6 @@
 <gresources>
   <gresource prefix="/com/nimbus/Hotspot">
     <file alias="style.css">com.nimbus.Hotspot.css</file>
+    <file alias="icons/scalable/apps/com.nimbus.Hotspot.svg">com.nimbus.Hotspot.svg</file>
   </gresource>
 </gresources>

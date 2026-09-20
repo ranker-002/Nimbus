@@ -9,6 +9,7 @@ nimbus-core = { path = "../nimbus-core" }
 nimbus-network = { path = "../nimbus-network" }
 nimbus-backend = { path = "../nimbus-backend" }
 tokio.workspace = true
+async-channel.workspace = true
 zbus.workspace = true
 log.workspace = true
 env_logger.workspace = true

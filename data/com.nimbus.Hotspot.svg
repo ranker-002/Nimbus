@@ -1,0 +1,17 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="nimbus-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="url(#nimbus-bg)"/>
+  <g transform="translate(64,56)" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round">
+    <path d="M-32,16 a46,46 0 0,1 64,0" opacity="0.35"/>
+    <path d="M-23,8 a33,33 0 0,1 46,0" opacity="0.55"/>
+    <path d="M-14,0 a20,20 0 0,1 28,0" opacity="0.8"/>
+    <circle cx="0" cy="18" r="4.5" fill="#ffffff" stroke="none"/>
+  </g>
+  <text x="64" y="112" text-anchor="middle" font-family="Inter, 'Segoe UI', sans-serif"
+        font-weight="800" font-size="19" fill="#ffffff" opacity="0.92">NIMBUS</text>
+</svg>
