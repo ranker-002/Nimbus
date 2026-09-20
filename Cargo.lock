@@ -1384,6 +1384,9 @@ dependencies = [
  "nimbus-backend",
  "nimbus-core",
  "nimbus-network",
+ "nimbus-telemetry",
+ "nimbus-wifi",
+ "serde_json",
  "tokio",
  "zbus",
 ]
@@ -1433,6 +1436,7 @@ dependencies = [
  "async-channel",
  "chrono",
  "env_logger",
+ "futures",
  "glib-build-tools",
  "gtk4",
  "libadwaita",
@@ -1449,6 +1453,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+ "zbus",
 ]
 
 [[package]]

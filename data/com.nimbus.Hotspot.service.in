@@ -6,6 +6,8 @@ Wants=NetworkManager.service
 
 [Service]
 Type=simple
+Environment=NIMBUS_HISTORY_DB=/var/lib/nimbus/history.db
+StateDirectory=nimbus
 ExecStart=@BINDIR@/nimbus-dbus-service
 Restart=on-failure
 RestartSec=2

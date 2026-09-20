@@ -82,6 +82,11 @@ impl HistoryDb {
 }
 
 fn db_path() -> PathBuf {
+    // The D-Bus service runs as root, so it keeps its database under
+    // /var/lib/nimbus instead of a root-owned file in a user's home.
+    if let Ok(path) = std::env::var("NIMBUS_HISTORY_DB") {
+        return PathBuf::from(path);
+    }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".local/share/nimbus-hotspot/history.db")
 }

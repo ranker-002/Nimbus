@@ -64,6 +64,11 @@ install_data(
   install_dir: join_paths(get_option('datadir'), 'dbus-1', 'system.d'),
 )
 
+install_data(
+  'data/com.nimbus.Hotspot.policy',
+  install_dir: join_paths(get_option('datadir'), 'polkit-1', 'actions'),
+)
+
 conf = configuration_data()
 conf.set('BINDIR', bindir)
 

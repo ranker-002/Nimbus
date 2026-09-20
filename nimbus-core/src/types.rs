@@ -240,7 +240,7 @@ impl HotspotConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum HotspotState {
     #[default]
     Inactive,
@@ -332,7 +332,7 @@ impl StationConnection {
 
 /// What starting the hotspot would do to an existing station connection living
 /// on the same adapter.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StaImpact {
     /// The AP interface carries no station connection, so there is nothing to
     /// lose.
@@ -357,7 +357,7 @@ impl StaImpact {
 }
 
 /// How the access point will actually be brought up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HotspotBackend {
     /// A NetworkManager AP profile on the adapter itself.
     ///
@@ -382,7 +382,7 @@ impl fmt::Display for HotspotBackend {
 }
 
 /// A machine-wide regulatory domain switch the plan would carry out.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegDomainChange {
     pub from: Option<String>,
     pub to: String,
@@ -390,7 +390,7 @@ pub struct RegDomainChange {
 
 /// The resolved, side-effect-free outcome of working out how a hotspot would be
 /// brought up. Produced before anything touches NetworkManager.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HotspotPlan {
     pub ap_interface: String,
     pub upstream_interface: Option<String>,
@@ -446,7 +446,7 @@ pub enum InterfaceState {
     Disconnected,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionRecord {
     pub id: i64,
     pub hotspot_uuid: String,
@@ -458,7 +458,7 @@ pub struct ConnectionRecord {
     pub total_tx_bytes: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BandwidthSample {
     pub rx_rate: u64,
     pub tx_rate: u64,
@@ -466,14 +466,14 @@ pub struct BandwidthSample {
     pub total_tx: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardStats {
     pub connected_stations: u32,
     pub bandwidth: BandwidthSample,
     pub uptime_secs: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScannedNetwork {
     pub ssid: String,
     pub bssid: String,
@@ -716,6 +716,51 @@ mod tests {
             HotspotState::Active("test".into())
         );
         assert_ne!(HotspotState::Inactive, HotspotState::Active("test".into()));
+    }
+
+    /// The D-Bus service ships these over the bus as JSON, so they have to
+    /// survive a serialisation round trip.
+    #[test]
+    fn test_service_payloads_round_trip_through_json() {
+        for state in [
+            HotspotState::Inactive,
+            HotspotState::Starting,
+            HotspotState::Active("Nimbus".into()),
+            HotspotState::Stopping,
+            HotspotState::Error("boom".into()),
+        ] {
+            let json = serde_json::to_string(&state).unwrap();
+            let back: HotspotState = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, state);
+        }
+
+        let plan = HotspotPlan {
+            ap_interface: "wlan0".into(),
+            upstream_interface: Some("wlp4s0".into()),
+            backend: HotspotBackend::SharedVirtualAp,
+            channel: Some(6),
+            effective_config: HotspotConfig {
+                channel: Some(6),
+                ..Default::default()
+            },
+            impact: StaImpact::DisconnectsUplink {
+                ssid: Some("Home".into()),
+            },
+            regdomain_change: Some(RegDomainChange {
+                from: Some("00".into()),
+                to: "FR".into(),
+            }),
+            share_blockers: vec!["needs root".into()],
+            warnings: vec!["heads up".into()],
+        };
+
+        let json = serde_json::to_string(&plan).unwrap();
+        let back: HotspotPlan = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.ap_interface, plan.ap_interface);
+        assert_eq!(back.backend, plan.backend);
+        assert_eq!(back.channel, plan.channel);
+        assert_eq!(back.impact, plan.impact);
+        assert_eq!(back.share_blockers, plan.share_blockers);
     }
 
     #[test]

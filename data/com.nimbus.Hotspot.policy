@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Nimbus</vendor>
+  <vendor_url>https://github.com/ranker-002/Nimbus</vendor_url>
+
+  <!-- The D-Bus service runs as root because hostapd, dnsmasq, nftables and
+       `iw reg set` need CAP_NET_ADMIN. Local users on an active session are
+       allowed to manage hotspots without a prompt, matching NetworkManager's
+       own policy; inactive or remote sessions need an administrator. -->
+  <action id="com.nimbus.hotspot.manage">
+    <description>Manage Wi-Fi hotspots</description>
+    <message>Authentication is required to create or stop a Wi-Fi hotspot</message>
+    <icon_name>network-wireless-symbolic</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

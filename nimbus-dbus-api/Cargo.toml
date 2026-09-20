@@ -8,8 +8,11 @@ license.workspace = true
 nimbus-core = { path = "../nimbus-core" }
 nimbus-network = { path = "../nimbus-network" }
 nimbus-backend = { path = "../nimbus-backend" }
+nimbus-wifi = { path = "../nimbus-wifi" }
+nimbus-telemetry = { path = "../nimbus-telemetry" }
 tokio.workspace = true
 async-channel.workspace = true
+serde_json.workspace = true
 zbus.workspace = true
 log.workspace = true
 env_logger.workspace = true
