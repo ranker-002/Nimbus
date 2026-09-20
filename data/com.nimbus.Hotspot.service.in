@@ -1,0 +1,14 @@
+[Unit]
+Description=Nimbus Hotspot D-Bus service
+Documentation=https://github.com/ranker-002/Nimbus
+After=NetworkManager.service dbus.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/nimbus-dbus-service
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

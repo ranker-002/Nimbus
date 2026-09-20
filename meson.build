@@ -1,16 +1,11 @@
 project('nimbus-hotspot', 'rust',
   version: '0.1.0',
-  license: 'GPL-3.0-or-later',
+  license: 'MIT',
   meson_version: '>= 0.62',
   default_options: [
     'warning_level=2',
   ],
 )
-
-i18n = import('i18n')
-gnome = import('gnome')
-
-base_id = 'com.nimbus.Hotspot'
 
 dependency('glib-2.0', version: '>= 2.66')
 dependency('gio-2.0', version: '>= 2.66')
@@ -19,21 +14,31 @@ dependency('libadwaita-1', version: '>= 1.4')
 
 cargo = find_program('cargo', required: true)
 source_dir = meson.current_source_dir()
+bindir = join_paths(get_option('prefix'), get_option('bindir'))
+
+# One cargo invocation builds all three binaries; the copies chain through the
+# same shell so meson gets every declared output. (`@SOURCE_DIR@` is not
+# expanded in custom_target commands, hence the direct interpolation. The
+# manifest path is quoted so directories with spaces still work.)
+cargo_build = cargo.full_path() + ' build --manifest-path "' + source_dir + '/Cargo.toml" --target-dir @OUTDIR@/target --release'
 
 custom_target('cargo-build',
   build_by_default: true,
   build_always_stale: true,
-  output: 'nimbus-hotspot',
+  output: ['nimbus-hotspot', 'nimbus', 'nimbus-dbus-service'],
   console: true,
   install: true,
-  install_dir: get_option('bindir'),
+  install_dir: [
+    get_option('bindir'),
+    get_option('bindir'),
+    get_option('bindir'),
+  ],
   command: [
-    cargo, 'build',
-    '--manifest-path', '@SOURCE_DIR@/Cargo.toml',
-    '--target-dir', '@OUTDIR@/target',
-    '--release',
-    '&&',
-    'cp', '@OUTDIR@/target/release/nimbus-hotspot', '@OUTPUT@',
+    'sh', '-c',
+    cargo_build +
+    ' && cp @OUTDIR@/target/release/nimbus-hotspot @OUTPUT0@' +
+    ' && cp @OUTDIR@/target/release/nimbus @OUTPUT1@' +
+    ' && cp @OUTDIR@/target/release/nimbus-dbus-service @OUTPUT2@',
   ],
 )
 
@@ -48,8 +53,27 @@ install_data(
 )
 
 install_data(
-  'data/com.nimbus.Hotspot.gschema.xml',
-  install_dir: join_paths(get_option('datadir'), 'glib-2.0', 'schemas'),
+  'data/com.nimbus.Hotspot.svg',
+  install_dir: join_paths(get_option('datadir'), 'icons', 'hicolor', 'scalable', 'apps'),
 )
 
-subdir('data')
+# D-Bus service and its bus policy: the service runs as root because hostapd,
+# dnsmasq, nftables and `iw reg set` all need CAP_NET_ADMIN.
+install_data(
+  'data/com.nimbus.Hotspot.conf',
+  install_dir: join_paths(get_option('datadir'), 'dbus-1', 'system.d'),
+)
+
+conf = configuration_data()
+conf.set('BINDIR', bindir)
+
+systemd_service = configure_file(
+  input: 'data/com.nimbus.Hotspot.service.in',
+  output: 'com.nimbus.Hotspot.service',
+  configuration: conf,
+)
+
+install_data(
+  systemd_service,
+  install_dir: join_paths(get_option('prefix'), 'lib', 'systemd', 'system'),
+)

@@ -5,6 +5,6 @@ Exec=nimbus-hotspot
 Icon=com.nimbus.Hotspot
 Terminal=false
 Type=Application
-Categories=Network;Utility;
+Categories=Network;
 Keywords=hotspot;wifi;wireless;access-point;
 StartupNotify=true
