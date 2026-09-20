@@ -76,6 +76,16 @@ Create a hotspot in two clicks. Share your internet instantly.
 
 ---
 
+## Project status
+
+Version 0.1.0. The GUI, CLI and D-Bus service are functional on
+NetworkManager-based desktops; 185 automated tests cover the planning,
+capability and lifecycle rules. Not implemented: 6 GHz, captive portal and
+system tray. The shared backend needs privileges — see
+[Troubleshooting](#troubleshooting).
+
+---
+
 ## How sharing works, and privileges
 
 Nimbus picks one of two backends per start:
@@ -129,6 +139,13 @@ sharing is blocked by privileges it also offers **Restart as Administrator**
 
 ## Install
 
+### Build dependencies
+
+- Rust (stable) and Cargo
+- GTK4 (>= 4.12) and libadwaita (>= 1.4) development packages
+- `pkg-config` (Meson only)
+- `meson` and `ninja` (Meson install only)
+
 ### From source (Cargo)
 
 ```bash
@@ -142,13 +159,18 @@ sudo install -Dm755 target/release/nimbus-hotspot /usr/local/bin/nimbus-hotspot
 sudo install -Dm755 target/release/nimbus /usr/local/bin/nimbus
 ```
 
-Install the desktop entry, icon, D-Bus service and policy the same way, or use
-Meson, which does it all:
+### With Meson (recommended)
+
+Meson also installs the D-Bus service and its policy, the desktop entry, the
+application icon and the systemd unit:
 
 ```bash
 meson setup build
 ninja -C build
 sudo ninja -C build install
+
+# Enable the privileged D-Bus backend (optional, needed for the shared AP)
+sudo systemctl enable --now com.nimbus.Hotspot.service
 ```
 
 ### Runtime requirements
@@ -218,6 +240,19 @@ Nimbus stores its state in `~/.config/nimbus-hotspot/`:
 
 Session history lives in the local SQLite database
 `~/.local/share/nimbus-hotspot/history.db`.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---------|---------------|
+| `Cannot start hotspot: AP mode not supported` | `iw` is missing or the adapter really has no AP mode. Install `iw`; Nimbus then checks the radio and reports precisely what is wrong. |
+| `Sharing your Wi-Fi connection needs administrator rights` | The shared backend needs root. Restart Nimbus with `sudo`, enable the D-Bus service, or use the **Restart as Administrator** button in the dialog. |
+| Hotspot starts but clients have no internet | Check that the adapter is not the only uplink, that `dnsmasq` is installed, and that the channel is outside DFS (52–64, 100–144) when no country is set. |
+| 5 GHz refuses to start | The world regulatory domain (`00`) forbids transmitting there. Install `wireless-regdb`, set a country code, or use 2.4 GHz. |
+| Hotspot started outside Nimbus is not shown | Nimbus only adopts access points it created (NetworkManager profiles named `Nimbus-*`). Stop the foreign AP first. |
+| GUI shows an empty device list | `iw dev <iface> station dump` may need privileges. Run Nimbus as root or through the D-Bus service. |
 
 ---
 
